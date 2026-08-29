@@ -28,18 +28,14 @@ COOKIE_NAME = "qbr_auth"
 COOKIE_SECRET = os.getenv("QBR_COOKIE_SECRET", "change-this-qbr-cookie-secret")
 COOKIE_DAYS = 30
 
+# IMPORTANT: CookieManager is a Streamlit widget. It must not be created from
+# @st.cache_data/@st.cache_resource. A single module-level instance avoids the
+# CachedWidgetWarning and lets the browser cookie survive Streamlit reruns.
+_COOKIE_MANAGER = stx.CookieManager(key="qbr_auth_cookie_manager") if stx else None
 
-def _create_cookie_manager():
-    """Create the CookieManager in normal Streamlit execution, never in a cached function."""
-    if stx is None:
-        return None
-    # Keep the component instance in session state so it is created once per
-    # Streamlit session. This function intentionally has NO @st.cache_* decorator.
-    if "_qbr_cookie_manager" not in st.session_state:
-        st.session_state["_qbr_cookie_manager"] = stx.CookieManager(
-            key="qbr_auth_cookie_manager"
-        )
-    return st.session_state["_qbr_cookie_manager"]
+
+def _cm():
+    return _COOKIE_MANAGER
 
 
 def _token(username: str, issued: int | None = None) -> str:
@@ -64,17 +60,17 @@ def _username_from_token(value: str):
             f"{username}|{issued}".encode("utf-8"),
             hashlib.sha256,
         ).hexdigest()
-        if hmac.compare_digest(signature, expected):
-            return username
+        return username if hmac.compare_digest(signature, expected) else None
     except Exception:
-        pass
-    return None
+        return None
 
 
 def _save_cookie(user: dict):
-    cm = _create_cookie_manager()
+    cm = _cm()
     username = str(user.get("Username", "")).strip() if user else ""
-    if cm and username:
+    if not cm or not username:
+        return False
+    try:
         cm.set(
             COOKIE_NAME,
             _token(username),
@@ -83,23 +79,36 @@ def _save_cookie(user: dict):
             expires_at=datetime.now() + timedelta(days=COOKIE_DAYS),
             same_site="lax",
         )
+        # CookieManager sends the set operation to the browser asynchronously.
+        # Give the component a short window before Streamlit reruns the script.
+        time.sleep(1.0)
+        return True
+    except Exception:
+        return False
 
 
 def _read_cookie():
-    cm = _create_cookie_manager()
+    cm = _cm()
     if not cm:
         return None
     try:
-        return _username_from_token(cm.get(COOKIE_NAME) or "")
+        value = cm.get(COOKIE_NAME)
+        if not value:
+            # CookieManager can need a short browser/component round trip after
+            # a hard browser refresh. Refresh the cookie collection once.
+            time.sleep(0.35)
+            value = cm.get_all().get(COOKIE_NAME)
+        return _username_from_token(value or "")
     except Exception:
         return None
 
 
 def _delete_cookie():
-    cm = _create_cookie_manager()
+    cm = _cm()
     if cm:
         try:
             cm.delete(COOKIE_NAME, key="qbr_auth_delete")
+            time.sleep(0.15)
         except Exception:
             pass
 
@@ -147,8 +156,6 @@ def initialise_auth_state():
         if key not in st.session_state:
             st.session_state[key] = value
 
-    # CookieManager is deliberately initialized here, outside any cached
-    # function. Browser refreshes can then restore the signed login cookie.
     if st.session_state.user is None:
         username = _read_cookie()
         if username:
@@ -171,7 +178,7 @@ def _set_authenticated_user(user: dict):
 
 
 def clear_session():
-    """Explicit logout. Normal browser refresh does not clear the cookie."""
+    """Explicit logout. Browser refresh does not clear the authentication cookie."""
     _delete_cookie()
     st.session_state.user = None
     st.session_state.auth_mode = "login"
@@ -188,15 +195,25 @@ def render_flash():
 
 def _css():
     st.markdown("""<style>
-.qbr-login-wrap{max-width:560px;margin:3vh auto 0}.qbr-auth-brand{padding:24px 22px;border-radius:26px;text-align:center;background:linear-gradient(135deg,#082c49,#106d88,#1da98c);color:#fff;box-shadow:10px 11px 0 rgba(8,44,73,.15),0 18px 35px rgba(8,44,73,.20);margin-bottom:18px}.qbr-auth-brand h1{margin:0;font:1000 30px 'Segoe UI',Aptos,sans-serif}.qbr-auth-brand p{margin:7px 0;font-size:12px}.qbr-auth-card{padding:22px 28px 28px;border-radius:28px;background:linear-gradient(145deg,#fff,#eaf6f8);border:1px solid #d2e5e9;box-shadow:14px 15px 35px rgba(11,52,74,.16),-8px -8px 20px #fff}.qbr-auth-title{text-align:center;font:1000 27px 'Segoe UI',Aptos,sans-serif;color:#12344d;margin:0 0 5px}.qbr-auth-sub{text-align:center;color:#5b7785;font-size:12px;margin-bottom:18px}.qbr-auth-label{width:390px;max-width:100%;margin:12px auto 5px;font:1000 13px 'Segoe UI',Aptos,sans-serif}.qbr-auth-label.user{color:#087b9a}.qbr-auth-label.pass{color:#16806f}.qbr-auth-label.new{color:#087b9a}.qbr-auth-label.confirm{color:#16806f}.qbr-auth-label.current{color:#8b6500}div[data-testid="stTextInput"]{width:390px!important;max-width:100%!important;margin:0 auto!important}div[data-testid="stTextInput"] input{height:46px!important;border-radius:999px!important;padding:0 17px!important;background:linear-gradient(145deg,#fff,#f0f8fa)!important;border:2px solid #c7e0e7!important;color:#12344d!important;box-shadow:inset 3px 3px 8px rgba(14,57,76,.07),4px 5px 0 rgba(15,39,66,.09)!important}div[data-testid="stTextInput"] input:focus{border-color:#1595a5!important;box-shadow:0 0 0 4px rgba(21,149,165,.12),4px 5px 0 rgba(15,39,66,.09)!important}.qbr-auth-primary{width:390px;max-width:100%;margin:15px auto 9px}.qbr-auth-primary button{width:100%!important;height:49px!important;border:0!important;border-radius:999px!important;color:#fff!important;font-weight:1000!important;background:linear-gradient(135deg,#0a5270,#128894,#20a58b)!important;box-shadow:6px 7px 0 rgba(15,39,66,.16),0 12px 23px rgba(15,39,66,.14)!important}.qbr-auth-note,.qbr-password-rule{width:390px;max-width:100%;margin:10px auto;padding:11px 14px;border-radius:14px;font-size:12px;box-shadow:3px 4px 0 rgba(15,39,66,.07)}.qbr-auth-note{background:#eaf7fb;border:1px solid #add9e3;color:#28596b}.qbr-password-rule{background:#fff7df;border:1px solid #ead28a;color:#725a00}.qbr-toast{display:flex;gap:11px;align-items:center;padding:12px 15px;border-radius:15px;margin:11px 0;box-shadow:4px 5px 0 rgba(15,39,66,.09);font-size:13px}.qbr-toast span{display:block;font-weight:600;margin-top:3px}.qbr-toast-icon{width:28px;height:28px;border-radius:50%;display:flex;align-items:center;justify-content:center;color:#fff}.qbr-toast.ok{background:#e7faef;border:1px solid #68c98d;color:#12623a}.qbr-toast.ok .qbr-toast-icon{background:#1d9b5b}.qbr-toast.bad{background:#fff0f0;border:1px solid #df8a8a;color:#982323}.qbr-toast.bad .qbr-toast-icon{background:#d43a3a}.qbr-toast.info{background:#eaf5ff;border:1px solid #7fb8e8;color:#185486}.qbr-toast.info .qbr-toast-icon{background:#237db7}footer{visibility:hidden}
+.qbr-login-wrap{max-width:560px;margin:3vh auto 0}
+.qbr-auth-brand{padding:25px 22px;border-radius:26px;text-align:center;background:linear-gradient(135deg,#082c49,#106d88,#1da98c);color:#fff;box-shadow:10px 11px 0 rgba(8,44,73,.15),0 18px 35px rgba(8,44,73,.20);margin-bottom:18px}
+.qbr-auth-brand h1{margin:0;font:1000 30px 'Segoe UI',Aptos,sans-serif}.qbr-auth-brand p{margin:7px 0;font-size:12px}
+.qbr-auth-card{padding:22px 28px 28px;border-radius:28px;background:linear-gradient(145deg,#fff,#eaf6f8);border:1px solid #d2e5e9;box-shadow:14px 15px 35px rgba(11,52,74,.16),-8px -8px 20px #fff}
+.qbr-auth-title{text-align:center;font:1000 27px 'Segoe UI',Aptos,sans-serif;color:#12344d;margin:0 0 5px}.qbr-auth-sub{text-align:center;color:#5b7785;font-size:12px;margin-bottom:18px}
+.qbr-auth-label{width:390px;max-width:100%;margin:12px auto 5px;font:1000 13px 'Segoe UI',Aptos,sans-serif}.qbr-auth-label.user{color:#087b9a}.qbr-auth-label.pass{color:#16806f}.qbr-auth-label.new{color:#087b9a}.qbr-auth-label.confirm{color:#16806f}.qbr-auth-label.current{color:#8b6500}
+div[data-testid="stTextInput"]{width:390px!important;max-width:100%!important;margin:0 auto!important}
+div[data-testid="stTextInput"] input{height:46px!important;border-radius:999px!important;padding:0 17px!important;background:linear-gradient(145deg,#ffffff,#e8f7fa)!important;border:2px solid #73c5d2!important;color:#12344d!important;box-shadow:inset 3px 3px 8px rgba(14,57,76,.07),5px 6px 0 rgba(15,39,66,.11),0 0 0 3px rgba(26,157,166,.05)!important}
+div[data-testid="stTextInput"] input:focus{border-color:#1595a5!important;box-shadow:0 0 0 4px rgba(21,149,165,.16),5px 6px 0 rgba(15,39,66,.12)!important}
+.qbr-auth-primary{width:390px;max-width:100%;margin:15px auto 9px}.qbr-auth-primary button{width:100%!important;height:50px!important;border:0!important;border-radius:999px!important;color:#fff!important;font-weight:1000!important;background:linear-gradient(135deg,#083d62,#0d8294,#20a58b)!important;box-shadow:7px 8px 0 rgba(15,39,66,.17),0 14px 25px rgba(15,39,66,.16)!important}
+.qbr-auth-card button{border-radius:15px!important;box-shadow:4px 5px 0 rgba(15,39,66,.11)!important}
+.qbr-auth-note,.qbr-password-rule{width:390px;max-width:100%;margin:10px auto;padding:11px 14px;border-radius:14px;font-size:12px;box-shadow:3px 4px 0 rgba(15,39,66,.07)}.qbr-auth-note{background:#eaf7fb;border:1px solid #add9e3;color:#28596b}.qbr-password-rule{background:#fff7df;border:1px solid #ead28a;color:#725a00}
+.qbr-toast{display:flex;gap:11px;align-items:center;padding:12px 15px;border-radius:15px;margin:11px 0;box-shadow:4px 5px 0 rgba(15,39,66,.09);font-size:13px}.qbr-toast span{display:block;font-weight:600;margin-top:3px}.qbr-toast-icon{width:28px;height:28px;border-radius:50%;display:flex;align-items:center;justify-content:center;color:#fff}.qbr-toast.ok{background:#e7faef;border:1px solid #68c98d;color:#12623a}.qbr-toast.ok .qbr-toast-icon{background:#1d9b5b}.qbr-toast.bad{background:#fff0f0;border:1px solid #df8a8a;color:#982323}.qbr-toast.bad .qbr-toast-icon{background:#d43a3a}.qbr-toast.info{background:#eaf5ff;border:1px solid #7fb8e8;color:#185486}.qbr-toast.info .qbr-toast-icon{background:#237db7}
+footer{visibility:hidden}
 </style>""", unsafe_allow_html=True)
 
 
 def _brand():
-    st.markdown(
-        '<div class="qbr-login-wrap"><div class="qbr-auth-brand"><h1>📊 QBR Executive Dashboard</h1><p>HCLTech Customer Operations Command Center</p></div></div>',
-        unsafe_allow_html=True,
-    )
+    st.markdown('<div class="qbr-login-wrap"><div class="qbr-auth-brand"><h1>📊 QBR Executive Dashboard</h1><p>HCLTech Customer Operations Command Center</p></div></div>', unsafe_allow_html=True)
 
 
 def _fields(prefix: str, current: bool = False):
@@ -224,107 +241,63 @@ def _login():
     a, b = st.columns(2)
     with a:
         if st.button("Set My Password", use_container_width=True, key="set_my_password_link"):
-            if not username.strip():
-                error_message("Username required.", "Enter your username first.")
+            if not username.strip(): error_message("Username required.", "Enter your username first.")
             else:
-                st.session_state.pending_alias = username.strip()
-                st.session_state.auth_mode = "set"
-                st.rerun()
+                st.session_state.pending_alias = username.strip(); st.session_state.auth_mode = "set"; st.rerun()
     with b:
         if st.button("Forgot Password", use_container_width=True, key="forgot_password_link"):
-            st.session_state.auth_mode = "forgot"
-            st.rerun()
-    if not clicked:
-        return
+            st.session_state.auth_mode = "forgot"; st.rerun()
+    if not clicked: return
     alias = username.strip()
-    if not alias:
-        error_message("Username required.")
-        return
+    if not alias: error_message("Username required."); return
     db = SessionLocal()
     try:
         account = get_user(db, alias)
-        if not account:
-            error_message("Username not found.")
-            return
-        if not account.get("IsActive"):
-            error_message("Account inactive.")
-            return
+        if not account: error_message("Username not found."); return
+        if not account.get("IsActive"): error_message("Account inactive."); return
         locked = account.get("LockedUntil")
-        if locked and locked > datetime.now():
-            error_message("Account temporarily locked.", "Please try again later.")
-            return
+        if locked and locked > datetime.now(): error_message("Account temporarily locked.", "Please try again later."); return
         if account.get("MustSetPassword") or not account.get("PasswordHash"):
-            st.session_state.pending_alias = alias
-            st.session_state.auth_mode = "set"
-            st.rerun()
+            st.session_state.pending_alias = alias; st.session_state.auth_mode = "set"; st.rerun()
         if verify_password(password, account.get("PasswordHash")):
-            clear_failed_logins(db, account["UserID"])
-            db.commit()
+            clear_failed_logins(db, account["UserID"]); db.commit()
             _set_authenticated_user(account)
             st.session_state.flash_message = ("Login successful.", f"Welcome {account['DisplayName']}.")
             st.rerun()
-        record_failed_login(db, account["UserID"])
-        db.commit()
-        error_message("Incorrect password.")
+        record_failed_login(db, account["UserID"]); db.commit(); error_message("Incorrect password.")
     except Exception as exc:
-        db.rollback()
-        error_message("Login failed.", str(exc))
-    finally:
-        db.close()
+        db.rollback(); error_message("Login failed.", str(exc))
+    finally: db.close()
 
 
 def render_login():
-    _css()
-    _brand()
-    _, center, _ = st.columns([1, 2.2, 1])
+    _css(); _brand(); _, center, _ = st.columns([1, 2.2, 1])
     with center:
         mode = st.session_state.get("auth_mode", "login")
-        if mode == "login":
-            _login()
-            return
+        if mode == "login": _login(); return
         if mode == "set":
             st.markdown('<div class="qbr-auth-card"><div class="qbr-auth-title">🔐 Set My Password</div><div class="qbr-auth-sub">First-time login — create your own password.</div></div>', unsafe_allow_html=True)
-            alias = st.session_state.get("pending_alias", "").strip()
-            db = SessionLocal()
-            try:
-                account = get_user(db, alias)
-            except Exception as exc:
-                account = None
-                error_message("Unable to read account.", str(exc))
-            finally:
-                db.close()
-            if not account:
-                error_message("Username not found.", "Please return to login.")
+            alias = st.session_state.get("pending_alias", "").strip(); db = SessionLocal()
+            try: account = get_user(db, alias)
+            except Exception as exc: account = None; error_message("Unable to read account.", str(exc))
+            finally: db.close()
+            if not account: error_message("Username not found.", "Please return to login.")
             else:
                 st.markdown(f'<div class="qbr-auth-note">👤 Account: <b>{account["DisplayName"]}</b> &nbsp;•&nbsp; Username: <b>{account["Username"]}</b></div>', unsafe_allow_html=True)
-                _, p1, p2 = _fields("set")
-                st.markdown('<div class="qbr-auth-primary">', unsafe_allow_html=True)
-                clicked = st.button("🔐 SET PASSWORD & CONTINUE", use_container_width=True, key="set_password_button")
-                st.markdown('</div>', unsafe_allow_html=True)
+                _, p1, p2 = _fields("set"); st.markdown('<div class="qbr-auth-primary">', unsafe_allow_html=True)
+                clicked = st.button("🔐 SET PASSWORD & CONTINUE", use_container_width=True, key="set_password_button"); st.markdown('</div>', unsafe_allow_html=True)
                 if clicked:
-                    if not valid_password(p1):
-                        error_message("Password policy failed.", "Use 8+ characters with uppercase, lowercase and a number.")
-                    elif p1 != p2:
-                        error_message("Passwords do not match.")
+                    if not valid_password(p1): error_message("Password policy failed.", "Use 8+ characters with uppercase, lowercase and a number.")
+                    elif p1 != p2: error_message("Passwords do not match.")
                     else:
                         db = SessionLocal()
                         try:
-                            set_password(db, account["UserID"], p1)
-                            db.commit()
-                            fresh = get_user(db, alias)
-                            if not fresh:
-                                raise RuntimeError("Account could not be reloaded after password update.")
-                            _set_authenticated_user(fresh)
-                            st.session_state.flash_message = ("Password set successfully.", "Welcome to the QBR Executive Dashboard.")
-                            st.rerun()
-                        except Exception as exc:
-                            db.rollback()
-                            error_message("Unable to set password.", str(exc))
-                        finally:
-                            db.close()
-            if st.button("← Back to Login", use_container_width=True, key="set_back"):
-                clear_session()
-                st.rerun()
+                            set_password(db, account["UserID"], p1); db.commit(); fresh = get_user(db, alias)
+                            if not fresh: raise RuntimeError("Account could not be reloaded after password update.")
+                            _set_authenticated_user(fresh); st.session_state.flash_message = ("Password set successfully.", "Welcome to the QBR Executive Dashboard."); st.rerun()
+                        except Exception as exc: db.rollback(); error_message("Unable to set password.", str(exc))
+                        finally: db.close()
+            if st.button("← Back to Login", use_container_width=True, key="set_back"): clear_session(); st.rerun()
             return
 
         st.markdown('<div class="qbr-auth-card"><div class="qbr-auth-title">🔑 Forgot Password</div><div class="qbr-auth-sub">Self-service reset — no supervisor or superuser approval required.</div></div>', unsafe_allow_html=True)
@@ -332,33 +305,19 @@ def render_login():
         alias = st.text_input("Username", label_visibility="collapsed", key="forgot_username")
         st.markdown('<div class="qbr-auth-label current">🪪 Registered Name</div>', unsafe_allow_html=True)
         display = st.text_input("Registered Name", label_visibility="collapsed", key="forgot_display_name")
-        _, p1, p2 = _fields("forgot")
-        st.markdown('<div class="qbr-auth-primary">', unsafe_allow_html=True)
-        clicked = st.button("🔑 RESET PASSWORD", use_container_width=True, key="forgot_reset_button")
-        st.markdown('</div>', unsafe_allow_html=True)
+        _, p1, p2 = _fields("forgot"); st.markdown('<div class="qbr-auth-primary">', unsafe_allow_html=True)
+        clicked = st.button("🔑 RESET PASSWORD", use_container_width=True, key="forgot_reset_button"); st.markdown('</div>', unsafe_allow_html=True)
         if clicked:
-            if not alias.strip() or not display.strip():
-                error_message("Missing account details.", "Enter username and registered name.")
-            elif not valid_password(p1):
-                error_message("Password policy failed.", "Use 8+ characters with uppercase, lowercase and a number.")
-            elif p1 != p2:
-                error_message("Passwords do not match.")
+            if not alias.strip() or not display.strip(): error_message("Missing account details.", "Enter username and registered name.")
+            elif not valid_password(p1): error_message("Password policy failed.", "Use 8+ characters with uppercase, lowercase and a number.")
+            elif p1 != p2: error_message("Passwords do not match.")
             else:
                 db = SessionLocal()
                 try:
                     ok, detail = reset_password_self_service(db, alias.strip(), display.strip(), p1)
                     if ok:
-                        db.commit()
-                        st.session_state.flash_message = ("Password reset successfully.", "You can now sign in with your new password.")
-                        clear_session()
-                        st.rerun()
-                    db.rollback()
-                    error_message("Password reset failed.", detail)
-                except Exception as exc:
-                    db.rollback()
-                    error_message("Unable to reset password.", str(exc))
-                finally:
-                    db.close()
-        if st.button("← Back to Login", use_container_width=True, key="forgot_back"):
-            clear_session()
-            st.rerun()
+                        db.commit(); st.session_state.flash_message = ("Password reset successfully.", "You can now sign in with your new password."); clear_session(); st.rerun()
+                    db.rollback(); error_message("Password reset failed.", detail)
+                except Exception as exc: db.rollback(); error_message("Unable to reset password.", str(exc))
+                finally: db.close()
+        if st.button("← Back to Login", use_container_width=True, key="forgot_back"): clear_session(); st.rerun()
