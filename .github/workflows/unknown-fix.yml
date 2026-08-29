@@ -1,0 +1,35 @@
+name: Unknown hierarchy cleanup
+on:
+  push:
+    branches: [test-chatgpt-write]
+jobs:
+  fix:
+    if: ${{ contains(github.event.head_commit.message, '[unknown-fix]') }}
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: test-chatgpt-write
+          fetch-depth: 0
+      - name: Remove literal Unknown precedence
+        shell: python
+        run: |
+          from pathlib import Path
+          p=Path('app/dashboard_data.py'); s=p.read_text(encoding='utf-8')
+          s=s.replace('NULLIF(LTRIM(RTRIM({alias}.ProjectName)),\'\')','NULLIF(NULLIF(LTRIM(RTRIM({alias}.ProjectName)),\'\'),\'Unknown\')')
+          s=s.replace('NULLIF(LTRIM(RTRIM({alias}.TrackName)),\'\')','NULLIF(NULLIF(LTRIM(RTRIM({alias}.TrackName)),\'\'),\'Unknown\')')
+          p.write_text(s,encoding='utf-8')
+      - name: Validate
+        run: |
+          python -m py_compile app/dashboard_data.py
+          python -m py_compile app/dashboard.py
+          python -m py_compile load_data.py
+      - name: Commit
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add app/dashboard_data.py
+          git commit -m "[unknown-fix] prefer hierarchy over literal Unknown labels"
+          git push origin test-chatgpt-write
