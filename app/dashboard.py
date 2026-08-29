@@ -260,6 +260,20 @@ section[data-testid="stSidebar"] [data-testid="stDateInput"] input {
     border-radius:18px;
     overflow:hidden;
     box-shadow:0 8px 24px rgba(15,39,66,.12);
+    background: linear-gradient(135deg, rgba(255,255,255,0.9), rgba(245,249,252,0.9));
+    border: 1px solid rgba(0,0,0,0.05);
+}
+
+/* Chart container with 3D effect */
+.chart-container {
+    position: relative;
+    border-radius: 18px;
+    background: linear-gradient(145deg, #ffffff, #f0f5f7);
+    box-shadow: 
+        0 10px 30px rgba(15,39,66,.15),
+        inset 0 1px 0 rgba(255,255,255,0.5);
+    padding: 10px;
+    margin: 10px 0;
 }
 
 /* ---------- Metrics ---------- */
@@ -593,7 +607,9 @@ if tower != "All" or track != "All":
 kpis = get_executive_kpis(start_date, end_date, tower_id, track_id)
 volume_df = get_tower_track_volume(start_date, end_date)
 alert_freq_df = get_alert_frequency(start_date, end_date, tower_id, track_id)
-parent_child_df = get_parent_child_relation(start_date, end_date, tower_id, track_id)
+parent_child_result = get_parent_child_relation(start_date, end_date, tower_id, track_id)
+parent_child_df = parent_child_result[0] if parent_child_result else pd.DataFrame()
+child_details_df = parent_child_result[1] if len(parent_child_result) > 1 else pd.DataFrame()
 volume_stats = get_volume_stats(start_date, end_date, tower_id, track_id)
 
 # Filter volume dataframe by tower/track selection
@@ -748,7 +764,7 @@ if volume_stats:
     )
 
 # ============================================================
-# Trend Charts - Enhanced Styling
+# Trend Charts - Enhanced 3D Styling
 # ============================================================
 st.markdown(
     '<div class="qbr-section">📈 Trend Analysis</div>',
@@ -774,26 +790,100 @@ col1, col2 = st.columns(2)
 with col1:
     st.markdown("### 📊 Ticket Volume Trend")
     if not trend_df.empty:
-        # Create enhanced bar chart with better colors
-        fig = px.bar(
-            trend_df,
-            x=x_col,
-            y=["Parents", "Children"] if "Parents" in trend_df.columns else "Total",
-            barmode="group",
-            template="plotly_white",
-            color_discrete_map={"Parents": "#2d7d9a", "Children": "#ee8233", "Total": "#19708b"},
-        )
+        # Create enhanced 3D-style bar chart with gradient colors
+        colors = ['#19708b', '#2d7d9a', '#5b8f3b', '#ee8233', '#c91414', '#8a6b09', '#6b4f8f']
+        
+        if "Parents" in trend_df.columns and "Children" in trend_df.columns:
+            fig = go.Figure()
+            
+            # Add Parents bar with 3D effect
+            fig.add_trace(go.Bar(
+                x=trend_df[x_col],
+                y=trend_df["Parents"],
+                name="Parents",
+                marker=dict(
+                    color='#2d7d9a',
+                    line=dict(color='rgba(255,255,255,0.5)', width=2),
+                    pattern_shape='/',
+                ),
+                marker_line_width=2,
+                marker_line_color='rgba(255,255,255,0.6)',
+                opacity=0.95,
+            ))
+            
+            # Add Children bar with 3D effect
+            fig.add_trace(go.Bar(
+                x=trend_df[x_col],
+                y=trend_df["Children"],
+                name="Children",
+                marker=dict(
+                    color='#ee8233',
+                    line=dict(color='rgba(255,255,255,0.5)', width=2),
+                ),
+                marker_line_width=2,
+                marker_line_color='rgba(255,255,255,0.6)',
+                opacity=0.95,
+            ))
+            
+            fig.update_layout(barmode='group')
+        else:
+            fig = px.bar(
+                trend_df,
+                x=x_col,
+                y="Total",
+                template="plotly_white",
+                color_discrete_sequence=['#19708b'],
+            )
+        
         fig.update_layout(
-            height=400,
-            margin=dict(l=10, r=10, t=30, b=10),
-            legend_title="",
+            height=420,
+            margin=dict(l=20, r=20, t=40, b=20),
+            legend=dict(
+                orientation="h",
+                yanchor="bottom",
+                y=1.02,
+                xanchor="right",
+                x=1,
+                bgcolor='rgba(255,255,255,0.8)',
+                bordercolor='rgba(0,0,0,0.1)',
+                borderwidth=1,
+            ),
             paper_bgcolor="rgba(0,0,0,0)",
-            plot_bgcolor="rgba(245,249,252,0.8)",
-            font=dict(family="Segoe UI, Aptos, sans-serif", size=12),
-            xaxis=dict(gridcolor="rgba(0,0,0,0.05)", showline=True, linecolor="rgba(0,0,0,0.1)"),
-            yaxis=dict(gridcolor="rgba(0,0,0,0.05)", showline=True, linecolor="rgba(0,0,0,0.1)"),
+            plot_bgcolor="rgba(245,249,252,0.5)",
+            font=dict(family="Segoe UI, Aptos, sans-serif", size=12, color='#12344d'),
+            xaxis=dict(
+                gridcolor="rgba(0,0,0,0.05)",
+                showline=True,
+                linecolor="rgba(0,0,0,0.2)",
+                linewidth=2,
+                tickfont=dict(size=11),
+            ),
+            yaxis=dict(
+                gridcolor="rgba(0,0,0,0.05)",
+                showline=True,
+                linecolor="rgba(0,0,0,0.2)",
+                linewidth=2,
+                tickfont=dict(size=11),
+            ),
+            # 3D effect with shadow
+            shapes=[
+                dict(
+                    type="rect",
+                    xref="paper", yref="paper",
+                    x0=0, y0=0, x1=1, y1=1,
+                    line=dict(color="rgba(0,0,0,0.1)", width=2),
+                    fillcolor="rgba(0,0,0,0)",
+                )
+            ],
         )
-        fig.update_traces(marker_line_width=1, marker_line_color="rgba(255,255,255,0.5)")
+        
+        # Add subtle shadow effect to bars
+        fig.update_traces(
+            marker_line_width=2,
+            marker_line_color="rgba(255,255,255,0.6)",
+            hovertemplate='<b>%{x}</b><br>Count: %{y}<extra></extra>',
+        )
+        
         st.plotly_chart(fig, use_container_width=True, key="trend_chart")
     else:
         st.info("No trend data available for selected filters.")
@@ -801,28 +891,58 @@ with col1:
 with col2:
     st.markdown("### 🏢 Tower/Track Volume")
     if not volume_df.empty:
-        # Create enhanced horizontal bar chart
-        colors = ["#19708b", "#2d7d9a", "#5b8f3b", "#ee8233", "#c91414", "#8a6b09", "#6b4f8f"]
-        fig = px.bar(
-            volume_df.head(15),
-            x="Total",
-            y="Track",
-            color="Tower",
-            orientation="h",
-            template="plotly_white",
-            color_discrete_sequence=colors,
-        )
+        # Create enhanced horizontal bar chart with vibrant colors
+        tower_colors = {
+            'Collaboration': '#2d7d9a',
+            'Security': '#c91414',
+            'Foundation': '#5b8f3b',
+            'Non-CMS': '#8a6b09',
+        }
+        
+        colors = [tower_colors.get(t, '#19708b') for t in volume_df.head(15)['Tower']]
+        
+        fig = go.Figure(go.Bar(
+            x=volume_df.head(15)['Total'],
+            y=volume_df.head(15)['Track'],
+            orientation='h',
+            marker=dict(
+                color=colors,
+                line=dict(color='rgba(255,255,255,0.5)', width=2),
+            ),
+            marker_line_width=2,
+            marker_line_color='rgba(255,255,255,0.6)',
+            opacity=0.95,
+            hovertemplate='<b>%{y}</b><br>Tower: %{customdata}<br>Tickets: %{x}<extra></extra>',
+            customdata=volume_df.head(15)['Tower'],
+        ))
+        
         fig.update_layout(
-            height=400,
-            margin=dict(l=10, r=10, t=30, b=10),
-            legend_title="Tower",
+            height=420,
+            margin=dict(l=20, r=20, t=40, b=20),
             paper_bgcolor="rgba(0,0,0,0)",
-            plot_bgcolor="rgba(245,249,252,0.8)",
-            font=dict(family="Segoe UI, Aptos, sans-serif", size=12),
-            xaxis=dict(gridcolor="rgba(0,0,0,0.05)", showline=True, linecolor="rgba(0,0,0,0.1)"),
-            yaxis=dict(showline=True, linecolor="rgba(0,0,0,0.1)"),
+            plot_bgcolor="rgba(245,249,252,0.5)",
+            font=dict(family="Segoe UI, Aptos, sans-serif", size=12, color='#12344d'),
+            xaxis=dict(
+                gridcolor="rgba(0,0,0,0.05)",
+                showline=True,
+                linecolor="rgba(0,0,0,0.2)",
+                linewidth=2,
+                title="Tickets",
+            ),
+            yaxis=dict(
+                showline=True,
+                linecolor="rgba(0,0,0,0.2)",
+                linewidth=2,
+                tickfont=dict(size=11),
+                categoryorder='total ascending',
+            ),
         )
-        fig.update_traces(marker_line_width=1, marker_line_color="rgba(255,255,255,0.5)")
+        
+        fig.update_traces(
+            marker_line_width=2,
+            marker_line_color="rgba(255,255,255,0.6)",
+        )
+        
         st.plotly_chart(fig, use_container_width=True, key="volume_chart")
     else:
         st.info("No volume data available for selected filters.")
@@ -840,13 +960,32 @@ col3, col4 = st.columns(2)
 with col3:
     st.markdown("### Highest Parent → Child Concentration")
     if not parent_child_df.empty:
+        # Enhanced dataframe display
         st.dataframe(
             parent_child_df.head(10),
             use_container_width=True,
             hide_index=True,
+            column_config={
+                "ParentTicket": st.column_config.TextColumn("Parent Ticket", width="medium"),
+                "Tower": st.column_config.TextColumn("Tower", width="small"),
+                "Track": st.column_config.TextColumn("Track", width="small"),
+                "Priority": st.column_config.TextColumn("Priority", width="small"),
+                "State": st.column_config.TextColumn("State", width="small"),
+                "ChildCount": st.column_config.NumberColumn("Children", width="small", format="%d"),
+            }
         )
+        st.caption(f"Showing {len(parent_child_df)} parent tickets with child relationships")
     else:
-        st.info("No parent-child data available.")
+        st.info("No parent-child data available for selected filters.")
+    
+    # Show child ticket details
+    if not child_details_df.empty:
+        with st.expander("🔍 View Child Ticket Details", expanded=False):
+            st.dataframe(
+                child_details_df,
+                use_container_width=True,
+                hide_index=True,
+            )
 
 with col4:
     st.markdown("### Highest Alert / Part Frequency")
@@ -855,9 +994,16 @@ with col4:
             alert_freq_df.head(10),
             use_container_width=True,
             hide_index=True,
+            column_config={
+                "Part": st.column_config.TextColumn("Part", width="medium"),
+                "AlertType": st.column_config.TextColumn("Alert Type", width="small"),
+                "Severity": st.column_config.TextColumn("Severity", width="small"),
+                "Count": st.column_config.NumberColumn("Count", width="small", format="%d"),
+            }
         )
+        st.caption(f"Showing {len(alert_freq_df)} alert patterns")
     else:
-        st.info("No alert data available.")
+        st.info("No alert data available for selected filters.")
 
 # ============================================================
 # Tower/Track Alert Summary
@@ -869,11 +1015,25 @@ st.markdown(
 
 alert_summary_df = get_tower_track_alerts(start_date, end_date)
 if not alert_summary_df.empty:
-    st.dataframe(
-        alert_summary_df,
-        use_container_width=True,
-        hide_index=True,
-    )
+    # Filter to show only tracks with alerts
+    alert_summary_filtered = alert_summary_df[alert_summary_df['TotalAlerts'] > 0]
+    if not alert_summary_filtered.empty:
+        st.dataframe(
+            alert_summary_filtered,
+            use_container_width=True,
+            hide_index=True,
+            column_config={
+                "Tower": st.column_config.TextColumn("Tower", width="medium"),
+                "Track": st.column_config.TextColumn("Track", width="medium"),
+                "TotalAlerts": st.column_config.NumberColumn("Total Alerts", width="small", format="%d"),
+                "Critical": st.column_config.NumberColumn("Critical", width="small", format="%d"),
+                "High": st.column_config.NumberColumn("High", width="small", format="%d"),
+                "Moderate": st.column_config.NumberColumn("Moderate", width="small", format="%d"),
+            }
+        )
+        st.caption(f"Showing {len(alert_summary_filtered)} tracks with alerts")
+    else:
+        st.info("No alerts found for selected filters.")
 else:
     st.info("No alert summary data available.")
 

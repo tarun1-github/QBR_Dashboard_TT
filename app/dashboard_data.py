@@ -370,24 +370,26 @@ def get_parent_child_relation(start_date=None, end_date=None, tower_id=None, tra
     """Get parent-child relationship from database."""
     db = SessionLocal()
     try:
+        # First, get all child tickets with their parent info (even if parent doesn't exist)
         query = """
             SELECT 
-                p.TicketNumber AS ParentTicket,
+                c.TicketNumber AS ChildTicket,
+                c.ParentTicketNumber AS ParentTicket,
                 t.TowerName,
                 tr.TrackName,
-                p.Priority,
-                COUNT(c.TicketKey) AS ChildCount
-            FROM qbr.Ticket p
-            LEFT JOIN qbr.Tower t ON t.TowerID = p.TowerID
-            LEFT JOIN qbr.Track tr ON tr.TrackID = p.TrackID
-            INNER JOIN qbr.Ticket c ON c.ParentTicketNumber = p.TicketNumber AND c.TicketType = 'Child'
-            WHERE p.TicketType = 'Parent'
-              AND (:start_date IS NULL OR p.OpenedAt >= :start_date)
-              AND (:end_date IS NULL OR p.OpenedAt <= :end_date)
-              AND (:tower_id IS NULL OR p.TowerID = :tower_id)
-              AND (:track_id IS NULL OR p.TrackID = :track_id)
-            GROUP BY p.TicketNumber, t.TowerName, tr.TrackName, p.Priority
-            ORDER BY ChildCount DESC
+                c.Priority,
+                c.State,
+                CASE WHEN p.TicketNumber IS NOT NULL THEN 1 ELSE 0 END AS ParentExists
+            FROM qbr.Ticket c
+            LEFT JOIN qbr.Tower t ON t.TowerID = c.TowerID
+            LEFT JOIN qbr.Track tr ON tr.TrackID = c.TrackID
+            LEFT JOIN qbr.Ticket p ON p.TicketNumber = c.ParentTicketNumber
+            WHERE c.TicketType = 'Child'
+              AND (:start_date IS NULL OR c.OpenedAt >= :start_date)
+              AND (:end_date IS NULL OR c.OpenedAt <= :end_date)
+              AND (:tower_id IS NULL OR c.TowerID = :tower_id)
+              AND (:track_id IS NULL OR c.TrackID = :track_id)
+            ORDER BY c.ParentTicketNumber
         """
         
         result = db.execute(text(query), {
@@ -400,14 +402,55 @@ def get_parent_child_relation(start_date=None, end_date=None, tower_id=None, tra
         data = []
         for row in result:
             data.append({
+                'ChildTicket': row[0],
+                'ParentTicket': row[1],
+                'Tower': row[2],
+                'Track': row[3],
+                'Priority': row[4],
+                'State': row[5],
+                'ParentExists': 'Yes' if row[6] == 1 else 'No'
+            })
+        
+        # Also get parent tickets with child count
+        query2 = """
+            SELECT 
+                p.TicketNumber AS ParentTicket,
+                t.TowerName,
+                tr.TrackName,
+                p.Priority,
+                p.State,
+                (SELECT COUNT(*) FROM qbr.Ticket c WHERE c.ParentTicketNumber = p.TicketNumber) AS ChildCount
+            FROM qbr.Ticket p
+            LEFT JOIN qbr.Tower t ON t.TowerID = p.TowerID
+            LEFT JOIN qbr.Track tr ON tr.TrackID = p.TrackID
+            WHERE p.TicketType = 'Parent'
+              AND (:start_date IS NULL OR p.OpenedAt >= :start_date)
+              AND (:end_date IS NULL OR p.OpenedAt <= :end_date)
+              AND (:tower_id IS NULL OR p.TowerID = :tower_id)
+              AND (:track_id IS NULL OR p.TrackID = :track_id)
+            ORDER BY ChildCount DESC
+        """
+        
+        result2 = db.execute(text(query2), {
+            'start_date': start_date,
+            'end_date': end_date,
+            'tower_id': tower_id,
+            'track_id': track_id
+        }).fetchall()
+        
+        data2 = []
+        for row in result2:
+            data2.append({
                 'ParentTicket': row[0],
                 'Tower': row[1],
                 'Track': row[2],
                 'Priority': row[3],
-                'ChildCount': row[4]
+                'State': row[4],
+                'ChildCount': row[5]
             })
         
-        return pd.DataFrame(data)
+        # Return both dataframes as a tuple
+        return pd.DataFrame(data2), pd.DataFrame(data)
     finally:
         db.close()
 
