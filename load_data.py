@@ -3,59 +3,48 @@ QBR Dashboard - Data Loader
 ============================
 Loads data from Excel (.xlsx), CSV (.csv), and text (.txt) files in app/dataset.
 
-IMPORTANT DATA QUALITY FLOW
+DATA QUALITY + ARCHIVE FLOW
 ---------------------------
-Before ANY database insert, this loader now:
-  1. Finds all supported source files in app/dataset.
-  2. Compares records across files using TicketNumber/Number/IncidentNumber/etc.
-  3. Detects duplicates both within a file and across files.
-  4. Writes ALL duplicate occurrences to _duplicate_records.xlsx.
-  5. Merges duplicate ticket rows into ONE consolidated row per ticket and writes
-     the load-ready data to _merged_input.xlsx.
-  6. Loads ONLY _merged_input.xlsx into qbr.Ticket.
-  7. Does NOT delete the original source files automatically.
+Before database insert this loader:
+  1. Discovers all supported source files in app/dataset.
+  2. Compares records across files using the ticket-number field.
+  3. Detects duplicate records within a file and across files.
+  4. Saves ALL duplicate occurrences to _duplicate_records.xlsx.
+  5. Builds one consolidated row per ticket in _merged_input.xlsx.
+  6. Loads ONLY the consolidated data into qbr.Ticket.
+  7. ONLY when the DB load completes with zero row errors, moves the original
+     source files plus generated audit files into app/dataset/processed/<timestamp>/.
+  8. If any DB error occurs, source files stay in app/dataset for retry/audit.
 
-Generated files beginning with '_' are treated as pipeline output and are never
-used as input files, preventing recursive re-processing on the next run.
-
-Usage:
-    python load_data.py
-    python load_data.py --file Created_tickets.xlsx
-    python load_data.py --show-summary
-    python load_data.py --clear
-    python load_data.py --dataset-folder app/dataset
+Generated files beginning with '_' are never treated as source inputs.
 """
 
 import sys
+import shutil
+from datetime import datetime
 from pathlib import Path
 
 import pandas as pd
 from sqlalchemy import text
 
-# Add project root to path
-ROOT = Path(__file__).resolve().parents[1]
-sys.path.insert(0, str(ROOT))
+ROOT = Path(__file__).resolve().parent
+if str(ROOT) not in sys.path:
+    sys.path.insert(0, str(ROOT))
 
 from app.db import SessionLocal
-
 
 SUPPORTED_EXTENSIONS = {".xlsx", ".xls", ".csv", ".txt"}
 GENERATED_PREFIX = "_"
 MERGED_OUTPUT = "_merged_input.xlsx"
 DUPLICATE_OUTPUT = "_duplicate_records.xlsx"
+PROCESSED_FOLDER = "processed"
 
-
-# ---------------------------------------------------------------------------
-# FILE / DATA QUALITY HELPERS
-# ---------------------------------------------------------------------------
 
 def _is_generated_file(path: Path) -> bool:
-    """Return True for loader-generated files that must not be re-loaded."""
     return path.name.startswith(GENERATED_PREFIX)
 
 
 def discover_source_files(dataset_path: Path, single_file=None):
-    """Discover supported source files, excluding generated pipeline outputs."""
     if single_file:
         path = Path(single_file)
         if not path.exists():
@@ -67,17 +56,19 @@ def discover_source_files(dataset_path: Path, single_file=None):
     if not dataset_path.exists():
         raise FileNotFoundError(f"Dataset folder not found: {dataset_path}")
 
-    files = [
-        p for p in dataset_path.iterdir()
-        if p.is_file() and p.suffix.lower() in SUPPORTED_EXTENSIONS and not _is_generated_file(p)
-    ]
-    return sorted(files, key=lambda p: p.name.lower())
+    return sorted(
+        [
+            p for p in dataset_path.iterdir()
+            if p.is_file()
+            and p.suffix.lower() in SUPPORTED_EXTENSIONS
+            and not _is_generated_file(p)
+        ],
+        key=lambda p: p.name.lower(),
+    )
 
 
 def read_source_file(filepath: Path) -> pd.DataFrame:
-    """Read XLSX/CSV/TXT using the same flexible input rules as the old loader."""
     ext = filepath.suffix.lower()
-
     if ext in {".xlsx", ".xls"}:
         df = pd.read_excel(filepath)
     elif ext == ".csv":
@@ -90,16 +81,14 @@ def read_source_file(filepath: Path) -> pd.DataFrame:
     else:
         raise ValueError(f"Unsupported file type: {ext}")
 
-    # Remove Excel/BOM/accidental whitespace from headers.
     df.columns = [str(c).replace("\ufeff", "").strip() for c in df.columns]
     return df
 
 
 def find_ticket_column(columns):
-    """Return the first authoritative ticket-number column present."""
     candidates = [
         "TicketNumber", "Ticket_Number", "Number", "Incident_Number",
-        "IncidentNumber", "Incident Number", "Ticket Number"
+        "IncidentNumber", "Incident Number", "Ticket Number",
     ]
     lookup = {str(c).strip().lower(): c for c in columns}
     for candidate in candidates:
@@ -110,13 +99,11 @@ def find_ticket_column(columns):
 
 
 def normalize_ticket_key(value):
-    """Normalize ticket numbers so INC001 and INC001 do not become different keys."""
     if pd.isna(value):
         return ""
     value = str(value).strip()
     if not value or value.lower() in {"nan", "none", "null"}:
         return ""
-    # Excel can turn numeric identifiers into 12345.0.
     if value.endswith(".0") and value[:-2].isdigit():
         value = value[:-2]
     return value.upper()
@@ -129,7 +116,6 @@ def _not_blank(value):
 
 
 def source_priority(filename: str) -> int:
-    """Prefer closed/resolved snapshots when duplicate ticket rows are merged."""
     name = filename.lower()
     if any(x in name for x in ("closed", "resolved", "complete", "completed")):
         return 30
@@ -139,13 +125,6 @@ def source_priority(filename: str) -> int:
 
 
 def consolidate_duplicate_rows(group: pd.DataFrame) -> dict:
-    """Merge multiple representations of one ticket into a single record.
-
-    Non-empty values from the highest-priority source are preferred. Missing
-    values are filled from lower-priority source rows. This is important when,
-    for example, Created_tickets.xlsx has the ticket and Closed_tickets.xlsx
-    contains the same ticket with Closed/Resolution fields populated.
-    """
     work = group.copy()
     work["_Priority"] = work["SourceFile"].map(source_priority)
     work["_Order"] = range(len(work))
@@ -156,17 +135,15 @@ def consolidate_duplicate_rows(group: pd.DataFrame) -> dict:
         if col in {"_Priority", "_Order", "TicketKey"}:
             continue
         values = [v for v in work[col].tolist() if _not_blank(v)]
-        if not values:
-            result[col] = None
-        else:
-            result[col] = values[0]
+        result[col] = values[0] if values else None
 
-    result["SourceFile"] = " | ".join(dict.fromkeys(str(x) for x in group["SourceFile"].tolist()))
+    result["SourceFile"] = " | ".join(
+        dict.fromkeys(str(x) for x in group["SourceFile"].tolist())
+    )
     return result
 
 
 def compare_and_merge_files(files, dataset_path: Path):
-    """Compare all source files, export duplicates, and create one load-ready file."""
     if not files:
         print("No supported source files found.")
         return None, None, 0, 0
@@ -201,9 +178,6 @@ def compare_and_merge_files(files, dataset_path: Path):
         return None, None, 0, 0
 
     combined = pd.concat(frames, ignore_index=True, sort=False)
-
-    # Duplicate key = same ticket number. We keep ALL occurrences in the
-    # duplicate report so the user can audit exactly what was supplied.
     valid_keys = combined["TicketKey"].ne("")
     key_counts = combined.loc[valid_keys, "TicketKey"].value_counts()
     duplicate_keys = set(key_counts[key_counts > 1].index)
@@ -221,20 +195,20 @@ def compare_and_merge_files(files, dataset_path: Path):
         )
         duplicates = duplicates.sort_values(["TicketKey", "SourceFile"])
     else:
-        duplicates = pd.DataFrame(columns=list(combined.columns) + [
-            "DuplicateCount", "DuplicateSources", "DuplicateType"
-        ])
+        duplicates = pd.DataFrame(
+            columns=list(combined.columns) + [
+                "DuplicateCount", "DuplicateSources", "DuplicateType"
+            ]
+        )
 
     duplicate_path = dataset_path / DUPLICATE_OUTPUT
     if duplicate_path.exists():
         duplicate_path.unlink()
     duplicates.to_excel(duplicate_path, index=False)
 
-    # Consolidate to one row per ticket. Non-ticket rows are retained separately
-    # so the loader can still report them as skipped rather than silently losing them.
     merged_records = []
     grouped = combined[valid_keys].groupby("TicketKey", sort=False)
-    for ticket_key, group in grouped:
+    for _, group in grouped:
         if len(group) == 1:
             record = group.iloc[0].to_dict()
             record.pop("TicketKey", None)
@@ -242,15 +216,13 @@ def compare_and_merge_files(files, dataset_path: Path):
         else:
             merged_records.append(consolidate_duplicate_rows(group))
 
-    no_key = combined.loc[~valid_keys]
-    for _, row in no_key.iterrows():
+    for _, row in combined.loc[~valid_keys].iterrows():
         record = row.to_dict()
         record.pop("TicketKey", None)
         merged_records.append(record)
 
     merged = pd.DataFrame(merged_records)
     if "SourceFile" in merged.columns:
-        # Keep source provenance but avoid using it as a database field accidentally.
         merged["SourceFile"] = merged["SourceFile"].fillna("").astype(str)
 
     merged_path = dataset_path / MERGED_OUTPUT
@@ -265,40 +237,30 @@ def compare_and_merge_files(files, dataset_path: Path):
         within_file = int((duplicates["DuplicateType"] == "Within file").sum())
 
     print("\nDATA QUALITY RESULT")
-    print(f"  Total input records:       {len(combined):,}")
-    print(f"  Unique ticket records:     {len(merged):,}")
-    print(f"  Duplicate occurrences:     {len(duplicates):,}")
-    print(f"  Duplicate ticket keys:     {len(duplicate_keys):,}")
-    print(f"  Cross-file duplicate rows:  {cross_file:,}")
-    print(f"  Within-file duplicate rows: {within_file:,}")
+    print(f"  Total input records:        {len(combined):,}")
+    print(f"  Unique ticket records:      {len(merged):,}")
+    print(f"  Duplicate occurrences:      {len(duplicates):,}")
+    print(f"  Duplicate ticket keys:      {len(duplicate_keys):,}")
+    print(f"  Cross-file duplicate rows:   {cross_file:,}")
+    print(f"  Within-file duplicate rows:  {within_file:,}")
     print(f"\n  Duplicate report: {duplicate_path}")
     print(f"  Load-ready merge:  {merged_path}")
     print("=" * 70)
-
     return merged_path, duplicate_path, len(duplicates), len(merged)
 
 
-# ---------------------------------------------------------------------------
-# DATABASE MAPPING / LOAD
-# ---------------------------------------------------------------------------
-
 def get_tower_track_map(db):
-    """Get mapping of Tower/Track names to IDs."""
     towers = db.execute(text("SELECT TowerID, TowerName FROM qbr.Tower")).fetchall()
     tracks = db.execute(text("SELECT TrackID, TowerID, TrackName FROM qbr.Track")).fetchall()
-    tower_map = {row[1]: row[0] for row in towers}
-    track_map = {row[2]: (row[0], row[1]) for row in tracks}
-    return tower_map, track_map
+    return {r[1]: r[0] for r in towers}, {r[2]: (r[0], r[1]) for r in tracks}
 
 
 def get_customer_map(db):
-    """Get mapping of Customer names to IDs."""
-    customers = db.execute(text("SELECT CustomerID, CustomerName FROM qbr.Customer")).fetchall()
-    return {row[1]: row[0] for row in customers}
+    rows = db.execute(text("SELECT CustomerID, CustomerName FROM qbr.Customer")).fetchall()
+    return {r[1]: r[0] for r in rows}
 
 
 def map_assignment_to_track(assignment_group, track_map):
-    """Map ServiceNow assignment group to a Track."""
     if not assignment_group or str(assignment_group).lower() == "nan":
         return None, None
 
@@ -312,8 +274,7 @@ def map_assignment_to_track(assignment_group, track_map):
         "DC-ACI": "DC-ACI", "INFRA": "Infra", "SOC": "SOC",
         "FN-SFNOC": "SFNOC", "FN-SFNOC-L1": "SFNOC", "FN-SFNOC-L2": "SFNOC",
         "FN-THD": "THD Data", "FN-THD-L1": "THD Data", "FN-THD-L2": "THD Data",
-        "HSBC-DATA": "HSBC Data",
-        "NC-RIL": "RIL", "NC-RIL-L1": "RIL", "NC-RIL-L2": "RIL",
+        "HSBC-DATA": "HSBC Data", "NC-RIL": "RIL", "NC-RIL-L1": "RIL", "NC-RIL-L2": "RIL",
         "JLK-WIRELESS": "THD Data", "JLK-R&S": "THD Data", "JLK": "THD Data",
     }
 
@@ -326,8 +287,6 @@ def map_assignment_to_track(assignment_group, track_map):
             if track_name in track_map:
                 return track_map[track_name]
 
-    # Last-resort direct TrackName match. This helps when a source already
-    # contains the friendly Track value instead of the ServiceNow group.
     for track_name, ids in track_map.items():
         if str(track_name).strip().upper() == upper:
             return ids
@@ -353,7 +312,6 @@ def parse_date(row, columns):
 
 
 def load_dataframe(db, df, filename):
-    """Load one already de-duplicated DataFrame into qbr.Ticket."""
     print(f"\nLoading merged data: {filename}")
     print(f"  Columns found: {list(df.columns)}")
 
@@ -461,37 +419,27 @@ def load_dataframe(db, df, filename):
     return loaded, errors
 
 
-def load_file(db, filepath):
-    """Compatibility wrapper for loading a single file."""
-    filepath = Path(filepath)
-    try:
-        df = read_source_file(filepath)
-        return load_dataframe(db, df, filepath.name)
-    except Exception as exc:
-        print(f"  Error reading file {filepath}: {exc}")
-        return 0, 1
+def _archive_successful_inputs(source_files, generated_files, dataset_path: Path):
+    """Move a successfully processed batch out of app/dataset."""
+    timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
+    archive_dir = dataset_path / PROCESSED_FOLDER / timestamp
+    archive_dir.mkdir(parents=True, exist_ok=True)
 
+    moved = []
+    for path in [*source_files, *generated_files]:
+        path = Path(path)
+        if not path.exists():
+            continue
+        destination = archive_dir / path.name
+        if destination.exists():
+            destination.unlink()
+        shutil.move(str(path), str(destination))
+        moved.append(path.name)
 
-# ---------------------------------------------------------------------------
-# DATABASE MAINTENANCE / SUMMARY
-# ---------------------------------------------------------------------------
-
-def clear_all_data():
-    """Clear all ticket and alert data."""
-    db = SessionLocal()
-    try:
-        print("Clearing all ticket and alert data...")
-        db.execute(text("DELETE FROM qbr.TicketAlert"))
-        db.execute(text("DELETE FROM qbr.Ticket"))
-        db.execute(text("DELETE FROM qbr.Alert"))
-        db.commit()
-        print("  Data cleared!")
-    finally:
-        db.close()
+    return archive_dir, moved
 
 
 def show_summary(db):
-    """Show database summary."""
     print("\n" + "=" * 50)
     print("QBR DASHBOARD DATA SUMMARY")
     print("=" * 50)
@@ -503,15 +451,9 @@ def show_summary(db):
     closed_tk = db.execute(text("SELECT COUNT(*) FROM qbr.Ticket WHERE State = 'Closed'")).scalar()
     alerts = db.execute(text("SELECT COUNT(*) FROM qbr.Alert")).scalar()
 
-    print(f"\nTICKETS:")
-    print(f"  Total: {total}")
-    print(f"  Parents: {parents}")
-    print(f"  Children: {children}")
-    print(f"  Open: {open_tk}")
-    print(f"  Closed: {closed_tk}")
+    print(f"\nTICKETS:\n  Total: {total}\n  Parents: {parents}\n  Children: {children}\n  Open: {open_tk}\n  Closed: {closed_tk}")
     print(f"\nALERTS:\n  Total: {alerts}")
 
-    print("\nBY TOWER:")
     towers = db.execute(text("""
         SELECT t.TowerName, COUNT(tk.TicketKey) AS cnt
         FROM qbr.Tower t
@@ -519,10 +461,10 @@ def show_summary(db):
         GROUP BY t.TowerName
         ORDER BY cnt DESC
     """)).fetchall()
+    print("\nBY TOWER:")
     for tower_name, count in towers:
         print(f"  {tower_name}: {count}")
 
-    print("\nBY TRACK:")
     tracks = db.execute(text("""
         SELECT t.TowerName, tr.TrackName, COUNT(tk.TicketKey) AS cnt
         FROM qbr.Track tr
@@ -531,6 +473,7 @@ def show_summary(db):
         GROUP BY t.TowerName, tr.TrackName
         ORDER BY cnt DESC
     """)).fetchall()
+    print("\nBY TRACK:")
     for tower_name, track_name, count in tracks:
         if count > 0:
             print(f"  {tower_name} > {track_name}: {count}")
@@ -539,9 +482,7 @@ def show_summary(db):
         SELECT MIN(OpenedAt), MAX(OpenedAt) FROM qbr.Ticket WHERE OpenedAt IS NOT NULL
     """)).fetchone()
     if date_range[0]:
-        print("\nDATE RANGE:")
-        print(f"  From: {date_range[0]}")
-        print(f"  To: {date_range[1]}")
+        print(f"\nDATE RANGE:\n  From: {date_range[0]}\n  To: {date_range[1]}")
 
     print("\n" + "=" * 50)
 
@@ -575,12 +516,9 @@ def main():
         print(exc)
         return
 
-    # SINGLE FILE MODE: still run the same duplicate/merge gate so no duplicate
-    # record can reach the DB merely because --file was used.
     merged_path, duplicate_path, duplicate_rows, merged_rows = compare_and_merge_files(
         source_files, dataset_path
     )
-
     if merged_path is None:
         print("Nothing to load.")
         return
@@ -591,15 +529,42 @@ def main():
         loaded, errors = load_dataframe(db, merged_df, merged_path.name)
         show_summary(db)
 
+        if errors == 0:
+            generated_files = [duplicate_path, merged_path]
+            archive_dir, moved_files = _archive_successful_inputs(
+                source_files, generated_files, dataset_path
+            )
+
+            print("\n" + "=" * 70)
+            print("POST-LOAD FILE CLEANUP")
+            print("=" * 70)
+            print("Data upload completed successfully with 0 load errors.")
+            if moved_files:
+                print("Source/audit file(s) moved successfully:")
+                for filename in moved_files:
+                    print(f"  - {filename}")
+                print(f"\nMoved location: {archive_dir}")
+            else:
+                print("No files required moving.")
+            print("=" * 70)
+        else:
+            archive_dir = None
+            print("\nPOST-LOAD FILE CLEANUP SKIPPED")
+            print(
+                f"Database load reported {errors:,} error(s). "
+                "Source files were retained in app/dataset for retry/audit."
+            )
+
         print("\nLOAD COMPLETE")
         print(f"  Source files checked : {len(source_files)}")
         print(f"  Duplicate rows saved : {duplicate_rows:,}")
         print(f"  Merged rows prepared  : {merged_rows:,}")
         print(f"  Rows inserted         : {loaded:,}")
         print(f"  Load errors           : {errors:,}")
-        print(f"  Duplicate report      : {duplicate_path}")
-        print(f"  Merged input          : {merged_path}")
-        print("  Original source files: RETAINED for audit")
+        if errors == 0:
+            print(f"  Archived batch        : {archive_dir}")
+        else:
+            print("  Original source files : RETAINED")
     finally:
         db.close()
 
