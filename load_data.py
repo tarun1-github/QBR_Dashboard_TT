@@ -1,22 +1,22 @@
 """
 QBR Dashboard - Data Loader
 ============================
-Loads data from Excel (.xlsx), CSV (.csv), and text (.txt) files in app/dataset.
+Loads .xlsx/.xls/.csv/.txt files from app/dataset.
 
-DATA QUALITY + ARCHIVE FLOW
----------------------------
-Before database insert this loader:
-  1. Discovers all supported source files in app/dataset.
-  2. Compares records across files using the ticket-number field.
-  3. Detects duplicate records within a file and across files.
-  4. Saves ALL duplicate occurrences to _duplicate_records.xlsx.
-  5. Builds one consolidated row per ticket in _merged_input.xlsx.
-  6. Loads ONLY the consolidated data into qbr.Ticket.
-  7. ONLY when the DB load completes with zero row errors, moves the original
-     source files plus generated audit files into app/dataset/processed/<timestamp>/.
-  8. If any DB error occurs, source files stay in app/dataset for retry/audit.
+SAFE LOAD FLOW
+--------------
+1. Discover all source files (generated files beginning with '_' are ignored).
+2. Read and normalize the ticket-number key.
+3. Detect duplicate ticket records within/across source files.
+4. Write every duplicate occurrence to _duplicate_records.xlsx.
+5. Merge duplicate occurrences into ONE load-ready record per TicketNumber.
+6. Optionally replace the existing qbr.Ticket data (--replace-tickets).
+7. Load only the deduplicated/merged records in ONE database transaction.
+8. If any row fails, ROLLBACK the whole batch; source files remain for retry.
+9. Only after a successful zero-error commit, move source/audit files to:
+      app/dataset/processed/<timestamp>/
 
-Generated files beginning with '_' are never treated as source inputs.
+Duplicate records are NEVER inserted as separate Ticket rows.
 """
 
 import sys
@@ -28,8 +28,8 @@ import pandas as pd
 from sqlalchemy import text
 
 ROOT = Path(__file__).resolve().parent
-if str(ROOT) not in sys.path:
-    sys.path.insert(0, str(ROOT))
+if str(ROOT.parent) not in sys.path:
+    sys.path.insert(0, str(ROOT.parent))
 
 from app.db import SessionLocal
 
@@ -38,6 +38,13 @@ GENERATED_PREFIX = "_"
 MERGED_OUTPUT = "_merged_input.xlsx"
 DUPLICATE_OUTPUT = "_duplicate_records.xlsx"
 PROCESSED_FOLDER = "processed"
+
+
+# Explicit business fallback confirmed for the current ServiceNow ticket feed.
+# It is used only when Ticket.TowerID/TrackID and source TrackName are missing.
+COMPANY_TRACK_MAPPING = {
+    "home depot": "THD Data",
+}
 
 
 def _is_generated_file(path: Path) -> bool:
@@ -70,7 +77,7 @@ def discover_source_files(dataset_path: Path, single_file=None):
 def read_source_file(filepath: Path) -> pd.DataFrame:
     ext = filepath.suffix.lower()
     if ext in {".xlsx", ".xls"}:
-        df = pd.read_excel(filepath)
+        df = pd.read_excel(filepath, dtype=object)
     elif ext == ".csv":
         df = pd.read_csv(filepath, dtype=object)
     elif ext == ".txt":
@@ -102,17 +109,21 @@ def normalize_ticket_key(value):
     if pd.isna(value):
         return ""
     value = str(value).strip()
-    if not value or value.lower() in {"nan", "none", "null"}:
+    if not value or value.lower() in {"nan", "none", "null", "nat"}:
         return ""
     if value.endswith(".0") and value[:-2].isdigit():
         value = value[:-2]
     return value.upper()
 
 
-def _not_blank(value):
+def normalize_text(value):
     if pd.isna(value):
-        return False
-    return str(value).strip().lower() not in {"", "nan", "none", "null", "nat"}
+        return ""
+    return str(value).strip().lower()
+
+
+def _not_blank(value) -> bool:
+    return normalize_text(value) not in {"", "nan", "none", "null", "nat"}
 
 
 def source_priority(filename: str) -> int:
@@ -125,6 +136,7 @@ def source_priority(filename: str) -> int:
 
 
 def consolidate_duplicate_rows(group: pd.DataFrame) -> dict:
+    """Merge duplicate occurrences into one record without loading duplicates."""
     work = group.copy()
     work["_Priority"] = work["SourceFile"].map(source_priority)
     work["_Order"] = range(len(work))
@@ -156,26 +168,38 @@ def compare_and_merge_files(files, dataset_path: Path):
         print(f"  - {f.name}")
 
     frames = []
+    read_errors = []
     for filepath in files:
         try:
             df = read_source_file(filepath)
             if df.empty:
                 print(f"  WARNING: {filepath.name} is empty")
                 continue
+
             df["SourceFile"] = filepath.name
             ticket_col = find_ticket_column(df.columns)
-            if ticket_col:
-                df["TicketKey"] = df[ticket_col].map(normalize_ticket_key)
-            else:
-                df["TicketKey"] = ""
-                print(f"  WARNING: {filepath.name} has no recognizable ticket-number column")
+            if not ticket_col:
+                read_errors.append(
+                    f"{filepath.name}: no recognizable ticket-number column"
+                )
+                print(f"  ERROR: {read_errors[-1]}")
+                continue
+
+            df["TicketKey"] = df[ticket_col].map(normalize_ticket_key)
+            missing_keys = int(df["TicketKey"].eq("").sum())
+            if missing_keys:
+                print(f"  WARNING: {filepath.name}: {missing_keys:,} row(s) have no ticket number")
             frames.append(df)
             print(f"  {filepath.name}: {len(df):,} records")
         except Exception as exc:
+            read_errors.append(f"{filepath.name}: {exc}")
             print(f"  ERROR reading {filepath.name}: {exc}")
 
     if not frames:
         return None, None, 0, 0
+
+    if read_errors:
+        raise RuntimeError("Source file validation failed:\n" + "\n".join(read_errors))
 
     combined = pd.concat(frames, ignore_index=True, sort=False)
     valid_keys = combined["TicketKey"].ne("")
@@ -196,16 +220,31 @@ def compare_and_merge_files(files, dataset_path: Path):
         duplicates = duplicates.sort_values(["TicketKey", "SourceFile"])
     else:
         duplicates = pd.DataFrame(
-            columns=list(combined.columns) + [
-                "DuplicateCount", "DuplicateSources", "DuplicateType"
-            ]
+            columns=list(combined.columns)
+            + ["DuplicateCount", "DuplicateSources", "DuplicateType"]
         )
 
     duplicate_path = dataset_path / DUPLICATE_OUTPUT
     if duplicate_path.exists():
         duplicate_path.unlink()
-    duplicates.to_excel(duplicate_path, index=False)
 
+    # Keep the duplicate audit easy to inspect: detailed records + summary sheet.
+    with pd.ExcelWriter(duplicate_path, engine="openpyxl") as writer:
+        duplicates.to_excel(writer, sheet_name="Duplicates", index=False)
+        if duplicate_keys:
+            summary = (
+                duplicates.groupby("TicketKey", as_index=False)
+                .agg(
+                    Occurrences=("TicketKey", "size"),
+                    SourceFiles=("SourceFile", lambda s: " | ".join(dict.fromkeys(s))),
+                )
+                .sort_values("Occurrences", ascending=False)
+            )
+        else:
+            summary = pd.DataFrame(columns=["TicketKey", "Occurrences", "SourceFiles"])
+        summary.to_excel(writer, sheet_name="Summary", index=False)
+
+    # Exactly one load-ready row per ticket key.
     merged_records = []
     grouped = combined[valid_keys].groupby("TicketKey", sort=False)
     for _, group in grouped:
@@ -216,10 +255,10 @@ def compare_and_merge_files(files, dataset_path: Path):
         else:
             merged_records.append(consolidate_duplicate_rows(group))
 
-    for _, row in combined.loc[~valid_keys].iterrows():
-        record = row.to_dict()
-        record.pop("TicketKey", None)
-        merged_records.append(record)
+    # Rows without ticket numbers are not safe to load as ticket records.
+    missing_key_rows = int((~valid_keys).sum())
+    if missing_key_rows:
+        print(f"  SKIPPED from load-ready merge: {missing_key_rows:,} row(s) without TicketNumber")
 
     merged = pd.DataFrame(merged_records)
     if "SourceFile" in merged.columns:
@@ -237,12 +276,13 @@ def compare_and_merge_files(files, dataset_path: Path):
         within_file = int((duplicates["DuplicateType"] == "Within file").sum())
 
     print("\nDATA QUALITY RESULT")
-    print(f"  Total input records:        {len(combined):,}")
-    print(f"  Unique ticket records:      {len(merged):,}")
-    print(f"  Duplicate occurrences:      {len(duplicates):,}")
-    print(f"  Duplicate ticket keys:      {len(duplicate_keys):,}")
+    print(f"  Total input records:         {len(combined):,}")
+    print(f"  Unique ticket records:       {len(merged):,}")
+    print(f"  Duplicate occurrences:       {len(duplicates):,}")
+    print(f"  Duplicate ticket keys:       {len(duplicate_keys):,}")
     print(f"  Cross-file duplicate rows:   {cross_file:,}")
     print(f"  Within-file duplicate rows:  {within_file:,}")
+    print(f"  Rows without ticket number:  {missing_key_rows:,}")
     print(f"\n  Duplicate report: {duplicate_path}")
     print(f"  Load-ready merge:  {merged_path}")
     print("=" * 70)
@@ -252,45 +292,56 @@ def compare_and_merge_files(files, dataset_path: Path):
 def get_tower_track_map(db):
     towers = db.execute(text("SELECT TowerID, TowerName FROM qbr.Tower")).fetchall()
     tracks = db.execute(text("SELECT TrackID, TowerID, TrackName FROM qbr.Track")).fetchall()
-    return {r[1]: r[0] for r in towers}, {r[2]: (r[0], r[1]) for r in tracks}
+    tower_by_name = {normalize_text(r[1]): r[0] for r in towers}
+    track_by_name = {normalize_text(r[2]): (r[0], r[1]) for r in tracks}
+    return tower_by_name, track_by_name
 
 
 def get_customer_map(db):
     rows = db.execute(text("SELECT CustomerID, CustomerName FROM qbr.Customer")).fetchall()
-    return {r[1]: r[0] for r in rows}
+    return {normalize_text(r[1]): r[0] for r in rows}
 
 
 def map_assignment_to_track(assignment_group, track_map):
-    if not assignment_group or str(assignment_group).lower() == "nan":
+    if not _not_blank(assignment_group):
         return None, None
 
     assignment_group = str(assignment_group).strip()
     mapping = {
-        "BOA-EV": "BOA EV", "BOA-EV-L1": "BOA EV", "BOA-EV-L2": "BOA EV",
-        "HSBC-COL": "HSBC Collab", "HSBC-COL-L1": "HSBC Collab", "HSBC-COL-L2": "HSBC Collab",
-        "PM": "Problem Management", "PM-L1": "Problem Management",
-        "BOA-TP": "BOA TP", "GTM-TP": "GTM TP", "HD-VOICE": "HD Voice (Bgl)",
-        "SCNOC": "SCNOC", "SEC-CYB": "Cybersecurity", "SEC-CYB-L1": "Cybersecurity", "SEC-CYB-L2": "Cybersecurity",
-        "DC-ACI": "DC-ACI", "INFRA": "Infra", "SOC": "SOC",
-        "FN-SFNOC": "SFNOC", "FN-SFNOC-L1": "SFNOC", "FN-SFNOC-L2": "SFNOC",
-        "FN-THD": "THD Data", "FN-THD-L1": "THD Data", "FN-THD-L2": "THD Data",
-        "HSBC-DATA": "HSBC Data", "NC-RIL": "RIL", "NC-RIL-L1": "RIL", "NC-RIL-L2": "RIL",
-        "JLK-WIRELESS": "THD Data", "JLK-R&S": "THD Data", "JLK": "THD Data",
+        "boa-ev": "BOA EV", "boa-ev-l1": "BOA EV", "boa-ev-l2": "BOA EV",
+        "hsbc-col": "HSBC Collab", "hsbc-col-l1": "HSBC Collab", "hsbc-col-l2": "HSBC Collab",
+        "pm": "Problem Management", "pm-l1": "Problem Management",
+        "boa-tp": "BOA TP", "gtm-tp": "GTM TP", "hd-voice": "HD Voice (Bgl)",
+        "scnoc": "SCNOC", "sec-cyb": "Cybersecurity", "sec-cyb-l1": "Cybersecurity", "sec-cyb-l2": "Cybersecurity",
+        "dc-aci": "DC-ACI", "infra": "Infra", "soc": "SOC",
+        "fn-sfnoc": "SFNOC", "fn-sfnoc-l1": "SFNOC", "fn-sfnoc-l2": "SFNOC",
+        "fn-thd": "THD Data", "fn-thd-l1": "THD Data", "fn-thd-l2": "THD Data",
+        "hsbc-data": "HSBC Data", "nc-ril": "RIL", "nc-ril-l1": "RIL", "nc-ril-l2": "RIL",
+        "jlk-wireless": "THD Data", "jlk-r&s": "THD Data", "jlk": "THD Data",
     }
 
-    if assignment_group in mapping and mapping[assignment_group] in track_map:
-        return track_map[mapping[assignment_group]]
+    normalized = normalize_text(assignment_group)
+    target = mapping.get(normalized)
+    if target and normalize_text(target) in track_map:
+        return track_map[normalize_text(target)]
 
-    upper = assignment_group.upper()
+    upper = normalized
     for key, track_name in mapping.items():
-        if key.upper() in upper or upper in key.upper():
-            if track_name in track_map:
-                return track_map[track_name]
+        if key in upper or upper in key:
+            if normalize_text(track_name) in track_map:
+                return track_map[normalize_text(track_name)]
 
-    for track_name, ids in track_map.items():
-        if str(track_name).strip().upper() == upper:
-            return ids
+    if normalized in track_map:
+        return track_map[normalized]
 
+    return None, None
+
+
+def map_company_to_track(company, track_map):
+    """Map a company account to a track when relational IDs are absent."""
+    target = COMPANY_TRACK_MAPPING.get(normalize_text(company))
+    if target and normalize_text(target) in track_map:
+        return track_map[normalize_text(target)]
     return None, None
 
 
@@ -311,14 +362,29 @@ def parse_date(row, columns):
     return None
 
 
+def clear_all_data(db=None):
+    """Explicitly replace qbr.Ticket data. Other dashboard data is preserved."""
+    own_session = db is None
+    session = db or SessionLocal()
+    try:
+        session.execute(text("DELETE FROM qbr.Ticket"))
+        session.commit()
+        print("Existing qbr.Ticket data cleared successfully.")
+    except Exception:
+        session.rollback()
+        raise
+    finally:
+        if own_session:
+            session.close()
+
+
 def load_dataframe(db, df, filename):
     print(f"\nLoading merged data: {filename}")
-    print(f"  Columns found: {list(df.columns)}")
+    print(f"  Load-ready records: {len(df):,}")
 
     _, track_map = get_tower_track_map(db)
     customer_map = get_customer_map(db)
     batch_id = db.execute(text("SELECT NEWID()")).scalar()
-    loaded = errors = skipped = existing = 0
 
     insert_sql = text("""
         INSERT INTO qbr.Ticket (
@@ -338,85 +404,138 @@ def load_dataframe(db, df, filename):
         )
     """)
 
-    for idx, row in df.iterrows():
-        try:
-            ticket_number = first_value(row, [
-                "Number", "TicketNumber", "Ticket_Number", "Incident_Number", "IncidentNumber",
-                "Incident Number", "Ticket Number"
-            ])
-            if not ticket_number:
-                skipped += 1
-                continue
+    loaded = 0
+    skipped = 0
+    errors = []
+    seen_in_batch = set()
 
-            parent = first_value(row, [
-                "Parent Incident", "ParentIncident", "Parent_Incident", "ParentTicketNumber", "Parent"
-            ])
-            ticket_type = "Child" if parent else "Parent"
+    try:
+        for idx, row in df.iterrows():
+            try:
+                ticket_number = first_value(row, [
+                    "Number", "TicketNumber", "Ticket_Number", "Incident_Number", "IncidentNumber",
+                    "Incident Number", "Ticket Number"
+                ])
+                ticket_key = normalize_ticket_key(ticket_number)
+                if not ticket_key:
+                    skipped += 1
+                    continue
 
-            company = first_value(row, ["Company account", "CompanyAccount", "Company", "Customer"])
-            customer_id = customer_map.get(company) if company else None
+                # Second safety gate: never insert the same TicketNumber twice in this batch.
+                if ticket_key in seen_in_batch:
+                    skipped += 1
+                    continue
+                seen_in_batch.add(ticket_key)
 
-            assignment = first_value(row, [
-                "Assignment group", "AssignmentGroup", "Assignment_Group", "Track", "TrackName"
-            ])
-            track_id, tower_id = map_assignment_to_track(assignment, track_map) if assignment else (None, None)
+                parent = first_value(row, [
+                    "Parent Incident", "ParentIncident", "Parent_Incident", "ParentTicketNumber", "Parent"
+                ])
+                ticket_type = "Child" if parent else "Parent"
 
-            opened = parse_date(row, ["Opened", "OpenedAt", "Opened_At", "Created", "CreatedDate"])
-            created = parse_date(row, ["Created", "CreatedAt", "Created_Date"])
-            updated = parse_date(row, ["Updated", "UpdatedAt", "Updated_Date"])
-            closed = parse_date(row, ["Closed", "ClosedAt", "Closed_At", "Resolved", "ResolvedAt"])
+                company = first_value(row, ["Company account", "CompanyAccount", "Company", "Customer"])
+                customer_id = customer_map.get(normalize_text(company)) if company else None
 
-            priority = first_value(row, ["Priority", "priority"])
-            state = first_value(row, ["State", "Status", "state", "status"])
-            impact = first_value(row, ["Impact", "impact"])
-            ci = first_value(row, ["Configuration item", "ConfigurationItem", "Configuration_Item", "CI"])
-            short_desc = first_value(row, ["Short description", "ShortDescription", "Short_Description", "Description"])
-            if short_desc:
-                short_desc = short_desc[:500]
-            resolution = first_value(row, ["Resolution code", "ResolutionCode", "Resolution_Code", "Resolution"])
-            cause = first_value(row, ["Cause code", "CauseCode", "Cause_Code", "Cause"])
+                # Prefer explicit source IDs, then source TrackName, then assignment group,
+                # and finally the confirmed CompanyAccount mapping.
+                track_id = first_value(row, ["TrackID"])
+                tower_id = first_value(row, ["TowerID"])
+                source_track = first_value(row, ["TrackName", "Track"])
 
-            exists = db.execute(
-                text("SELECT 1 FROM qbr.Ticket WHERE TicketNumber = :tn"),
-                {"tn": ticket_number},
-            ).first()
-            if exists:
-                existing += 1
-                continue
+                if track_id and str(track_id).isdigit():
+                    track_id = int(track_id)
+                    row_track = db.execute(
+                        text("SELECT TowerID FROM qbr.Track WHERE TrackID = :tid"),
+                        {"tid": track_id},
+                    ).scalar()
+                    tower_id = int(row_track) if row_track is not None else None
+                else:
+                    track_id = None
+                    tower_id = None
 
-            db.execute(insert_sql, {
-                "tn": ticket_number,
-                "parent": parent,
-                "tt": ticket_type,
-                "cid": customer_id,
-                "tid": tower_id,
-                "trid": track_id,
-                "ag": assignment,
-                "ca": company,
-                "ci": ci,
-                "pri": priority,
-                "st": state,
-                "imp": impact,
-                "sd": short_desc,
-                "opened": opened,
-                "created": created,
-                "updated": updated,
-                "closed": closed,
-                "res": resolution,
-                "cause": cause,
-                "sf": filename,
-                "batch": batch_id,
-            })
-            loaded += 1
+                if track_id is None and source_track:
+                    ids = track_map.get(normalize_text(source_track))
+                    if ids:
+                        track_id, tower_id = ids
 
-        except Exception as exc:
-            errors += 1
-            if errors <= 5:
-                print(f"    Error on row {idx + 1}: {exc}")
+                if track_id is None:
+                    assignment = first_value(row, [
+                        "Assignment group", "AssignmentGroup", "Assignment_Group"
+                    ])
+                    track_id, tower_id = map_assignment_to_track(assignment, track_map)
+                else:
+                    assignment = first_value(row, [
+                        "Assignment group", "AssignmentGroup", "Assignment_Group"
+                    ])
 
-    db.commit()
-    print(f"  Loaded: {loaded:,}, Existing DB: {existing:,}, Skipped: {skipped:,}, Errors: {errors:,}")
-    return loaded, errors
+                if track_id is None and company:
+                    track_id, tower_id = map_company_to_track(company, track_map)
+
+                opened = parse_date(row, ["Opened", "OpenedAt", "Opened_At", "Created", "CreatedDate"])
+                created = parse_date(row, ["Created", "CreatedAt", "Created_Date"])
+                updated = parse_date(row, ["Updated", "UpdatedAt", "Updated_Date"])
+                closed = parse_date(row, ["Closed", "ClosedAt", "Closed_At", "Resolved", "ResolvedAt"])
+
+                priority = first_value(row, ["Priority", "priority"])
+                state = first_value(row, ["State", "Status", "state", "status"])
+                impact = first_value(row, ["Impact", "impact"])
+                ci = first_value(row, ["Configuration item", "ConfigurationItem", "Configuration_Item", "CI"])
+                short_desc = first_value(row, ["Short description", "ShortDescription", "Short_Description", "Description"])
+                if short_desc:
+                    short_desc = short_desc[:500]
+                resolution = first_value(row, ["Resolution code", "ResolutionCode", "Resolution_Code", "Resolution"])
+                cause = first_value(row, ["Cause code", "CauseCode", "Cause_Code", "Cause"])
+
+                # Existing DB records are skipped safely. Use --replace-tickets for a clean reload.
+                exists = db.execute(
+                    text("SELECT 1 FROM qbr.Ticket WHERE TicketNumber = :tn"),
+                    {"tn": ticket_number},
+                ).first()
+                if exists:
+                    skipped += 1
+                    continue
+
+                db.execute(insert_sql, {
+                    "tn": ticket_number,
+                    "parent": parent,
+                    "tt": ticket_type,
+                    "cid": customer_id,
+                    "tid": tower_id,
+                    "trid": track_id,
+                    "ag": assignment,
+                    "ca": company,
+                    "ci": ci,
+                    "pri": priority,
+                    "st": state,
+                    "imp": impact,
+                    "sd": short_desc,
+                    "opened": opened,
+                    "created": created,
+                    "updated": updated,
+                    "closed": closed,
+                    "res": resolution,
+                    "cause": cause,
+                    "sf": filename,
+                    "batch": batch_id,
+                })
+                loaded += 1
+
+            except Exception as exc:
+                errors.append(f"row {idx + 1}: {exc}")
+
+        if errors:
+            db.rollback()
+            print(f"  LOAD FAILED - rolling back {loaded:,} inserted row(s).")
+            for msg in errors[:10]:
+                print(f"    {msg}")
+            return 0, len(errors), skipped
+
+        db.commit()
+        print(f"  Loaded: {loaded:,}, Skipped/existing: {skipped:,}, Errors: 0")
+        return loaded, 0, skipped
+
+    except Exception:
+        db.rollback()
+        raise
 
 
 def _archive_successful_inputs(source_files, generated_files, dataset_path: Path):
@@ -493,7 +612,10 @@ def main():
     parser = argparse.ArgumentParser(description="QBR Dashboard Data Loader")
     parser.add_argument("--file", help="Specific source file to load")
     parser.add_argument("--show-summary", action="store_true", help="Show data summary")
-    parser.add_argument("--clear", action="store_true", help="Clear all data before loading")
+    parser.add_argument(
+        "--replace-tickets", "--clear", dest="replace_tickets", action="store_true",
+        help="Replace all existing qbr.Ticket rows after pre-load validation; use only for a full clean reload",
+    )
     parser.add_argument("--dataset-folder", default="app/dataset", help="Dataset folder path")
     args = parser.parse_args()
 
@@ -507,29 +629,50 @@ def main():
             db.close()
         return
 
-    if args.clear:
-        clear_all_data()
-
     try:
         source_files = discover_source_files(dataset_path, args.file)
     except FileNotFoundError as exc:
         print(exc)
         return
 
-    merged_path, duplicate_path, duplicate_rows, merged_rows = compare_and_merge_files(
-        source_files, dataset_path
-    )
+    if not source_files:
+        print("No source files found in app/dataset.")
+        return
+
+    try:
+        merged_path, duplicate_path, duplicate_rows, merged_rows = compare_and_merge_files(
+            source_files, dataset_path
+        )
+    except Exception as exc:
+        print(f"\nPRE-LOAD VALIDATION FAILED: {exc}")
+        print("Source files were NOT moved and NO database load was attempted.")
+        return
+
     if merged_path is None:
         print("Nothing to load.")
         return
 
     db = SessionLocal()
     try:
+        # Validation/merge is complete before any destructive DB operation.
+        if args.replace_tickets:
+            print("\nFULL CLEAN TICKET RELOAD REQUESTED")
+            print("Existing qbr.Ticket rows will be deleted only now, after duplicate validation.")
+            try:
+                db.execute(text("DELETE FROM qbr.Ticket"))
+                db.commit()
+                print("Existing qbr.Ticket data cleared successfully.")
+            except Exception as exc:
+                db.rollback()
+                print(f"ERROR clearing qbr.Ticket: {exc}")
+                print("Source files were retained for retry.")
+                return
+
         merged_df = read_source_file(merged_path)
-        loaded, errors = load_dataframe(db, merged_df, merged_path.name)
-        show_summary(db)
+        loaded, errors, skipped = load_dataframe(db, merged_df, merged_path.name)
 
         if errors == 0:
+            show_summary(db)
             generated_files = [duplicate_path, merged_path]
             archive_dir, moved_files = _archive_successful_inputs(
                 source_files, generated_files, dataset_path
@@ -540,31 +683,30 @@ def main():
             print("=" * 70)
             print("Data upload completed successfully with 0 load errors.")
             if moved_files:
-                print("Source/audit file(s) moved successfully:")
+                print("Files moved successfully:")
                 for filename in moved_files:
                     print(f"  - {filename}")
                 print(f"\nMoved location: {archive_dir}")
-            else:
-                print("No files required moving.")
             print("=" * 70)
         else:
-            archive_dir = None
             print("\nPOST-LOAD FILE CLEANUP SKIPPED")
             print(
                 f"Database load reported {errors:,} error(s). "
-                "Source files were retained in app/dataset for retry/audit."
+                "The transaction was rolled back and source files were retained in app/dataset."
             )
 
         print("\nLOAD COMPLETE")
         print(f"  Source files checked : {len(source_files)}")
         print(f"  Duplicate rows saved : {duplicate_rows:,}")
-        print(f"  Merged rows prepared  : {merged_rows:,}")
-        print(f"  Rows inserted         : {loaded:,}")
-        print(f"  Load errors           : {errors:,}")
+        print(f"  Merged rows prepared : {merged_rows:,}")
+        print(f"  Rows inserted        : {loaded:,}")
+        print(f"  Rows skipped         : {skipped:,}")
+        print(f"  Load errors          : {errors:,}")
         if errors == 0:
-            print(f"  Archived batch        : {archive_dir}")
+            print(f"  Archived batch       : {archive_dir}")
         else:
-            print("  Original source files : RETAINED")
+            print("  Original source files: RETAINED")
+
     finally:
         db.close()
 
