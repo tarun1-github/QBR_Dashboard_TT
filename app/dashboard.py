@@ -28,83 +28,70 @@ from app.dashboard_data import (
 st.set_page_config(page_title="QBR Executive Dashboard", page_icon="📊", layout="wide", initial_sidebar_state="expanded")
 initialise_auth_state()
 if not st.session_state.get("user"):
-    render_flash()
-    render_login()
-    st.stop()
+    render_flash(); render_login(); st.stop()
 render_flash()
 
 st.markdown("""
 <style>
-[data-testid="stAppViewContainer"]{background:linear-gradient(145deg,#f7fbfc 0%,#eaf5f7 52%,#dceef2 100%)}
-.main .block-container{padding:1.1rem 2rem 3rem;max-width:1700px}
-section[data-testid="stSidebar"]{background:linear-gradient(180deg,#082c49 0%,#075c76 54%,#087c78 100%)!important;box-shadow:12px 0 30px rgba(5,36,56,.24)}
-.qbr-side-title{color:#fff;font-weight:1000;letter-spacing:.7px;border-radius:17px;padding:13px 14px;margin:5px 0 12px;background:linear-gradient(135deg,#0b4969,#1097a0,#18ad8a);box-shadow:0 7px 0 rgba(0,0,0,.18),0 12px 25px rgba(0,0,0,.15)}
-.qbr-side-head{color:#e8ffff;font-size:11px;font-weight:1000;letter-spacing:.8px;border-radius:13px;padding:9px 12px;margin:15px 0 7px;background:linear-gradient(135deg,#0b6578,#0b9297);box-shadow:4px 5px 0 rgba(0,0,0,.15)}
-section[data-testid="stSidebar"] .stButton>button{border-radius:15px!important;background:linear-gradient(145deg,#fff,#e0eff3)!important;color:#12344d!important;font-weight:900!important;box-shadow:5px 6px 0 rgba(0,0,0,.16)!important;border:1px solid #c5dce3!important}
-section[data-testid="stSidebar"] div[data-baseweb="select"]>div,section[data-testid="stSidebar"] input{border-radius:13px!important;background:#fff!important;color:#12344d!important;border:2px solid #d2e5e9!important;box-shadow:inset 2px 2px 7px rgba(12,55,76,.08)!important}
-.qbr-hero{padding:24px 30px;border-radius:28px;background:linear-gradient(135deg,#082c49 0%,#0e6884 48%,#19a88f 100%);color:#fff;box-shadow:0 18px 38px rgba(8,44,73,.24),8px 9px 0 rgba(8,44,73,.13),inset 0 1px rgba(255,255,255,.25);margin-bottom:17px}
-.qbr-hero h1{margin:0;font:1000 34px 'Segoe UI',Aptos,sans-serif}.qbr-hero p{margin:7px 0 0;font-size:13px;opacity:.96}
-.qbr-section{font:1000 20px 'Segoe UI',Aptos,sans-serif;color:#12344d;margin:21px 0 9px;padding:11px 15px;border-radius:16px;background:linear-gradient(145deg,#fff,#eaf5f7);box-shadow:5px 6px 0 rgba(15,39,66,.08),0 10px 22px rgba(15,39,66,.07);border:1px solid #d4e5e9}
-.qbr-kpi{min-height:112px;padding:17px;border-radius:22px;color:#fff;box-shadow:0 14px 27px rgba(15,39,66,.18),6px 7px 0 rgba(15,39,66,.11),inset 0 1px rgba(255,255,255,.35)}
-.qbr-kpi .t{font-size:10px;font-weight:1000;letter-spacing:.55px}.qbr-kpi .v{font-size:31px;font-weight:1000;margin-top:7px;text-shadow:0 3px 5px rgba(0,0,0,.2)}.qbr-kpi .s{font-size:10px;opacity:.96;margin-top:3px}
-.qbr-card{padding:13px 16px;border-radius:20px;background:linear-gradient(145deg,#fff,#edf7f8);box-shadow:7px 8px 0 rgba(15,39,66,.08),0 13px 26px rgba(15,39,66,.08);border:1px solid #d3e5e9}
-.stButton>button,.stDownloadButton>button{border-radius:15px!important;font-weight:900!important;box-shadow:5px 6px 0 rgba(15,39,66,.13)!important}
-.js-plotly-plot{border-radius:18px;overflow:hidden;box-shadow:0 10px 24px rgba(15,39,66,.10);border:1px solid #d6e7ea;background:#fff}
-.qbr-msg{padding:12px 16px;border-radius:15px;margin:9px 0;box-shadow:4px 5px 0 rgba(15,39,66,.09);font-weight:800}.ok{background:#e7faef;border:1px solid #68c98d;color:#12623a}.bad{background:#fff0f0;border:1px solid #df8a8a;color:#982323}.inf{background:#eaf5ff;border:1px solid #7fb8e8;color:#185486}
-.qbr-pill{display:inline-block;padding:6px 10px;border-radius:999px;font-weight:900;font-size:11px;margin:2px 4px 2px 0;box-shadow:3px 4px 0 rgba(15,39,66,.08)}
+[data-testid="stAppViewContainer"]{background:linear-gradient(180deg,#f8fbfc 0%,#edf6f8 55%,#e5f1f4 100%)}
+.main .block-container{padding:1rem 1.5rem 3rem;max-width:1700px}
+section[data-testid="stSidebar"]{background:linear-gradient(180deg,#082f4d,#075d76 55%,#087d78)!important;box-shadow:10px 0 28px rgba(5,36,56,.22)}
+.qbr-side-title{color:#fff;font-weight:1000;letter-spacing:.6px;border-radius:16px;padding:12px 14px;margin:5px 0 12px;background:linear-gradient(135deg,#0b4969,#1097a0,#18ad8a);box-shadow:0 7px 0 rgba(0,0,0,.16)}
+.qbr-side-head{color:#e8ffff;font-size:11px;font-weight:1000;letter-spacing:.7px;border-radius:12px;padding:8px 11px;margin:13px 0 6px;background:rgba(11,143,151,.8)}
+section[data-testid="stSidebar"] .stButton>button{border-radius:13px!important;background:linear-gradient(145deg,#fff,#e2f0f3)!important;color:#12344d!important;font-weight:900!important;box-shadow:4px 5px 0 rgba(0,0,0,.15)!important;border:1px solid #c4dce3!important}
+section[data-testid="stSidebar"] div[data-baseweb="select"]>div,section[data-testid="stSidebar"] input{border-radius:12px!important;background:#fff!important;color:#12344d!important;border:1px solid #cfe2e7!important}
+.qbr-hero{padding:23px 28px;border-radius:25px;background:linear-gradient(135deg,#082c49,#0e6783 52%,#19a78e);color:#fff;box-shadow:0 14px 30px rgba(8,44,73,.21),7px 8px 0 rgba(8,44,73,.11);margin-bottom:15px}
+.qbr-hero h1{margin:0;font:1000 34px 'Segoe UI',Aptos,sans-serif}.qbr-hero p{margin:7px 0 0;font-size:13px}
+.qbr-section{font:1000 20px 'Segoe UI',Aptos,sans-serif;color:#12344d;margin:19px 0 9px;padding:10px 14px;border-radius:15px;background:#fff;border:1px solid #d6e6ea;box-shadow:4px 5px 0 rgba(15,39,66,.07)}
+.qbr-kpi{min-height:105px;padding:16px;border-radius:20px;color:#fff;box-shadow:0 10px 22px rgba(15,39,66,.15),5px 6px 0 rgba(15,39,66,.09)}
+.qbr-kpi .t{font-size:10px;font-weight:1000;letter-spacing:.5px}.qbr-kpi .v{font-size:31px;font-weight:1000;margin-top:7px;text-shadow:0 2px 4px rgba(0,0,0,.18)}.qbr-kpi .s{font-size:10px;opacity:.94}
+.qbr-card{padding:10px 13px;border-radius:18px;background:#fff;border:1px solid #d6e6ea;box-shadow:0 8px 20px rgba(15,39,66,.07)}
+.js-plotly-plot{border-radius:16px;overflow:hidden;border:1px solid #d8e8eb;box-shadow:0 7px 18px rgba(15,39,66,.07);background:#fff}
+.qbr-msg{padding:12px 15px;border-radius:14px;margin:8px 0;box-shadow:3px 4px 0 rgba(15,39,66,.08);font-weight:800}.ok{background:#e7faef;border:1px solid #68c98d;color:#12623a}.bad{background:#fff0f0;border:1px solid #df8a8a;color:#982323}.inf{background:#eaf5ff;border:1px solid #7fb8e8;color:#185486}
+.qbr-pill{display:inline-block;padding:5px 10px;border-radius:999px;font-weight:900;font-size:10px;margin:2px 4px 2px 0;box-shadow:2px 3px 0 rgba(15,39,66,.08)}
 footer{visibility:hidden}
 </style>
-""", unsafe_allow_html=True)
+""",unsafe_allow_html=True)
 
 
 def msg(kind,title,detail=""):
-    cls={"ok":"ok","bad":"bad","inf":"inf"}.get(kind,"inf")
-    icon={"ok":"✓","bad":"!","inf":"i"}.get(kind,"i")
+    cls={"ok":"ok","bad":"bad","inf":"inf"}.get(kind,"inf");icon={"ok":"✓","bad":"!","inf":"i"}.get(kind,"i")
     st.markdown(f'<div class="qbr-msg {cls}">{icon}&nbsp;&nbsp;<b>{title}</b> {detail}</div>',unsafe_allow_html=True)
 
-
-def user(): return st.session_state.user or {}
-def role(): return str(user().get("RoleName") or user().get("role") or "").upper()
-def uname(): return str(user().get("Username") or user().get("username") or "")
-def dname(): return str(user().get("DisplayName") or user().get("name") or uname())
-
+def user():return st.session_state.user or {}
+def role():return str(user().get("RoleName") or user().get("role") or "").upper()
+def uname():return str(user().get("Username") or user().get("username") or "")
+def dname():return str(user().get("DisplayName") or user().get("name") or uname())
 
 def assigned_tracks(username):
     db=SessionLocal()
     try:
         cols={str(r[0]) for r in db.execute(text("SELECT COLUMN_NAME FROM INFORMATION_SCHEMA.COLUMNS WHERE TABLE_SCHEMA='qbr' AND TABLE_NAME='UserTrackAccess'")).fetchall()}
         if "TowerTrackID" in cols:
-            q="""SELECT tt.TowerName,tt.TrackName FROM qbr.UserTrackAccess a JOIN qbr.AppUser u ON u.UserID=a.UserID JOIN qbr.TowerTrack tt ON tt.TowerTrackID=a.TowerTrackID WHERE LOWER(u.Username)=LOWER(:u) AND ISNULL(tt.IsActive,1)=1 ORDER BY tt.TowerName,tt.TrackName"""
+            q="SELECT tt.TowerName,tt.TrackName FROM qbr.UserTrackAccess a JOIN qbr.AppUser u ON u.UserID=a.UserID JOIN qbr.TowerTrack tt ON tt.TowerTrackID=a.TowerTrackID WHERE LOWER(u.Username)=LOWER(:u) AND ISNULL(tt.IsActive,1)=1 ORDER BY tt.TowerName,tt.TrackName"
         else:
-            q="""SELECT t.TowerName,tr.TrackName FROM qbr.UserTrackAccess a JOIN qbr.AppUser u ON u.UserID=a.UserID JOIN qbr.Track tr ON tr.TrackID=a.TrackID JOIN qbr.Tower t ON t.TowerID=tr.TowerID WHERE LOWER(u.Username)=LOWER(:u) AND ISNULL(tr.IsActive,1)=1 ORDER BY t.TowerName,tr.TrackName"""
+            q="SELECT t.TowerName,tr.TrackName FROM qbr.UserTrackAccess a JOIN qbr.AppUser u ON u.UserID=a.UserID JOIN qbr.Track tr ON tr.TrackID=a.TrackID JOIN qbr.Tower t ON t.TowerID=tr.TowerID WHERE LOWER(u.Username)=LOWER(:u) AND ISNULL(tr.IsActive,1)=1 ORDER BY t.TowerName,tr.TrackName"
         return [(r[0],r[1]) for r in db.execute(text(q),{"u":username}).fetchall()]
-    finally: db.close()
-
+    finally:db.close()
 
 def admin_rows():
     db=SessionLocal()
     try:
         cols={str(r[0]) for r in db.execute(text("SELECT COLUMN_NAME FROM INFORMATION_SCHEMA.COLUMNS WHERE TABLE_SCHEMA='qbr' AND TABLE_NAME='UserTrackAccess'")).fetchall()}
-        if "TowerTrackID" in cols:
-            q="""SELECT u.DisplayName,u.Username,u.RoleName,tt.TowerName,tt.TrackName,uta.CanView,uta.CanExport,uta.CanManage,uta.UserTrackAccessID FROM qbr.UserTrackAccess uta JOIN qbr.AppUser u ON u.UserID=uta.UserID JOIN qbr.TowerTrack tt ON tt.TowerTrackID=uta.TowerTrackID WHERE ISNULL(tt.IsActive,1)=1 ORDER BY tt.TowerName,tt.TrackName,u.DisplayName"""
-        else:
-            q="""SELECT u.DisplayName,u.Username,u.RoleName,t.TowerName,tr.TrackName,uta.CanView,uta.CanExport,uta.CanManage,uta.UserTrackAccessID FROM qbr.UserTrackAccess uta JOIN qbr.AppUser u ON u.UserID=uta.UserID JOIN qbr.Track tr ON tr.TrackID=uta.TrackID JOIN qbr.Tower t ON t.TowerID=tr.TowerID WHERE ISNULL(tr.IsActive,1)=1 ORDER BY t.TowerName,tr.TrackName,u.DisplayName"""
+        if "TowerTrackID" in cols:q="SELECT u.DisplayName,u.Username,u.RoleName,tt.TowerName,tt.TrackName,uta.CanView,uta.CanExport,uta.CanManage FROM qbr.UserTrackAccess uta JOIN qbr.AppUser u ON u.UserID=uta.UserID JOIN qbr.TowerTrack tt ON tt.TowerTrackID=uta.TowerTrackID WHERE ISNULL(tt.IsActive,1)=1 ORDER BY tt.TowerName,tt.TrackName,u.DisplayName"
+        else:q="SELECT u.DisplayName,u.Username,u.RoleName,t.TowerName,tr.TrackName,uta.CanView,uta.CanExport,uta.CanManage FROM qbr.UserTrackAccess uta JOIN qbr.AppUser u ON u.UserID=uta.UserID JOIN qbr.Track tr ON tr.TrackID=uta.TrackID JOIN qbr.Tower t ON t.TowerID=tr.TowerID WHERE ISNULL(tr.IsActive,1)=1 ORDER BY t.TowerName,tr.TrackName,u.DisplayName"
         return db.execute(text(q)).mappings().all()
-    finally: db.close()
-
+    finally:db.close()
 
 def manager_users():
     db=SessionLocal()
     try:return db.execute(text("SELECT UserID,Username,DisplayName,RoleName,IsActive FROM qbr.AppUser WHERE IsActive=1 ORDER BY DisplayName")).mappings().all()
     finally:db.close()
 
-
 def _assignment_target(db,tower,track):
     cols={str(r[0]) for r in db.execute(text("SELECT COLUMN_NAME FROM INFORMATION_SCHEMA.COLUMNS WHERE TABLE_SCHEMA='qbr' AND TABLE_NAME='UserTrackAccess'")).fetchall()}
-    if "TowerTrackID" in cols:
-        return db.execute(text("SELECT TowerTrackID FROM qbr.TowerTrack WHERE TowerName=:t AND TrackName=:tr AND ISNULL(IsActive,1)=1"),{"t":tower,"tr":track}).scalar(),"TowerTrackID"
+    if "TowerTrackID" in cols:return db.execute(text("SELECT TowerTrackID FROM qbr.TowerTrack WHERE TowerName=:t AND TrackName=:tr AND ISNULL(IsActive,1)=1"),{"t":tower,"tr":track}).scalar(),"TowerTrackID"
     return db.execute(text("SELECT tr.TrackID FROM qbr.Track tr JOIN qbr.Tower t ON t.TowerID=tr.TowerID WHERE t.TowerName=:t AND tr.TrackName=:tr AND ISNULL(tr.IsActive,1)=1"),{"t":tower,"tr":track}).scalar(),"TrackID"
-
 
 def assign_manager(username,tower,track):
     db=SessionLocal()
@@ -113,21 +100,18 @@ def assign_manager(username,tower,track):
         if not u or not target:return False,"User or Tower → Track not found."
         if str(u["RoleName"]).upper()!="MANAGER":return False,f'{u["DisplayName"]} current role is {u["RoleName"]}. Change the role to MANAGER first.'
         if target_col=="TowerTrackID":
-            existing=db.execute(text("""SELECT u.DisplayName,tt.TowerName,tt.TrackName FROM qbr.UserTrackAccess a JOIN qbr.AppUser u ON u.UserID=a.UserID JOIN qbr.TowerTrack tt ON tt.TowerTrackID=a.TowerTrackID WHERE a.UserID=:uid"""),{"uid":u["UserID"]}).mappings().first()
-            occupied=db.execute(text("""SELECT u.DisplayName FROM qbr.UserTrackAccess a JOIN qbr.AppUser u ON u.UserID=a.UserID WHERE a.TowerTrackID=:target AND UPPER(u.RoleName)='MANAGER'"""),{"target":target}).mappings().first()
+            existing=db.execute(text("SELECT TOP 1 u.DisplayName,tt.TowerName,tt.TrackName FROM qbr.UserTrackAccess a JOIN qbr.AppUser u ON u.UserID=a.UserID JOIN qbr.TowerTrack tt ON tt.TowerTrackID=a.TowerTrackID WHERE a.UserID=:uid"),{"uid":u["UserID"]}).mappings().first();occupied=db.execute(text("SELECT TOP 1 u.DisplayName FROM qbr.UserTrackAccess a JOIN qbr.AppUser u ON u.UserID=a.UserID WHERE a.TowerTrackID=:target AND UPPER(u.RoleName)='MANAGER'"),{"target":target}).mappings().first()
             if existing:return False,f'{u["DisplayName"]} is already assigned to {existing["TowerName"]} → {existing["TrackName"]}. One track per manager.'
             if occupied:return False,f'{tower} → {track} is already assigned to {occupied["DisplayName"]}. One manager per track.'
             db.execute(text("INSERT INTO qbr.UserTrackAccess(UserID,TowerTrackID,CanView,CanExport,CanManage) VALUES(:uid,:target,1,1,0)"),{"uid":u["UserID"],"target":target})
         else:
-            existing=db.execute(text("""SELECT u.DisplayName,t.TowerName,tr.TrackName FROM qbr.UserTrackAccess a JOIN qbr.AppUser u ON u.UserID=a.UserID JOIN qbr.Track tr ON tr.TrackID=a.TrackID JOIN qbr.Tower t ON t.TowerID=tr.TowerID WHERE a.UserID=:uid"""),{"uid":u["UserID"]}).mappings().first()
-            occupied=db.execute(text("""SELECT u.DisplayName FROM qbr.UserTrackAccess a JOIN qbr.AppUser u ON u.UserID=a.UserID WHERE a.TrackID=:target AND UPPER(u.RoleName)='MANAGER'"""),{"target":target}).mappings().first()
+            existing=db.execute(text("SELECT TOP 1 u.DisplayName,t.TowerName,tr.TrackName FROM qbr.UserTrackAccess a JOIN qbr.AppUser u ON u.UserID=a.UserID JOIN qbr.Track tr ON tr.TrackID=a.TrackID JOIN qbr.Tower t ON t.TowerID=tr.TowerID WHERE a.UserID=:uid"),{"uid":u["UserID"]}).mappings().first();occupied=db.execute(text("SELECT TOP 1 u.DisplayName FROM qbr.UserTrackAccess a JOIN qbr.AppUser u ON u.UserID=a.UserID WHERE a.TrackID=:target AND UPPER(u.RoleName)='MANAGER'"),{"target":target}).mappings().first()
             if existing:return False,f'{u["DisplayName"]} is already assigned to {existing["TowerName"]} → {existing["TrackName"]}. One track per manager.'
             if occupied:return False,f'{tower} → {track} is already assigned to {occupied["DisplayName"]}. One manager per track.'
             db.execute(text("INSERT INTO qbr.UserTrackAccess(UserID,TrackID,CanView,CanExport,CanManage) VALUES(:uid,:target,1,1,0)"),{"uid":u["UserID"],"target":target})
         db.commit();return True,f'{u["DisplayName"]} added to {tower} → {track} successfully.'
     except Exception as e:db.rollback();return False,str(e)
     finally:db.close()
-
 
 def remove_manager(username,tower,track):
     db=SessionLocal()
@@ -140,17 +124,14 @@ def remove_manager(username,tower,track):
     except Exception as e:db.rollback();return False,str(e)
     finally:db.close()
 
-
 def update_role(username,new_role):
     db=SessionLocal()
     try:
         old=db.execute(text("SELECT DisplayName,RoleName FROM qbr.AppUser WHERE LOWER(Username)=LOWER(:u)"),{"u":username}).mappings().first()
         if not old:return False,"User not found."
-        db.execute(text("UPDATE qbr.AppUser SET RoleName=:r WHERE LOWER(Username)=LOWER(:u)"),{"r":new_role,"u":username});db.commit()
-        return True,f'{old["DisplayName"]} role changed from {old["RoleName"]} to {new_role} successfully.'
+        db.execute(text("UPDATE qbr.AppUser SET RoleName=:r WHERE LOWER(Username)=LOWER(:u)"),{"r":new_role,"u":username});db.commit();return True,f'{old["DisplayName"]} role changed from {old["RoleName"]} to {new_role} successfully.'
     except Exception as e:db.rollback();return False,str(e)
     finally:db.close()
-
 
 def _safe_int(v):
     try:return int(v or 0)
@@ -161,66 +142,41 @@ def _safe_float(v):
     except Exception:return 0.0
 
 def render_kpi(col,item):
-    lab,val,sub,bg,kind=item
-    display=f"{_safe_int(val):,}" if kind=="int" else f"{_safe_float(val):,.1f}" if kind=="float" else str(val)
+    lab,val,sub,bg,kind=item;display=f"{_safe_int(val):,}" if kind=="int" else f"{_safe_float(val):,.1f}" if kind=="float" else str(val)
     col.markdown(f'<div class="qbr-kpi" style="background:{bg}"><div class="t">{lab}</div><div class="v">{display}</div><div class="s">{sub}</div></div>',unsafe_allow_html=True)
 
-
-def _fig_base(title,height=360):
-    fig=go.Figure()
-    fig.update_layout(
-        title=dict(text=title,font=dict(size=17,color="#12344d"),x=0.01,xanchor="left"),
-        height=height,margin=dict(l=10,r=18,t=52,b=45),paper_bgcolor="rgba(0,0,0,0)",plot_bgcolor="#ffffff",
-        font=dict(family="Segoe UI, Aptos, sans-serif",color="#12344d",size=11),showlegend=False,
-        hoverlabel=dict(bgcolor="#12344d",font=dict(color="#fff")),
-    )
-    fig.update_xaxes(showgrid=False,showline=False,zeroline=False,tickfont=dict(size=10,color="#547080"))
-    fig.update_yaxes(showgrid=True,gridcolor="#e3eef1",showline=False,zeroline=False,tickfont=dict(size=10,color="#547080"))
+def _fig(title,height=360):
+    fig=go.Figure();fig.update_layout(title=dict(text=title,font=dict(size=16,color="#12344d"),x=.01),height=height,margin=dict(l=10,r=18,t=50,b=45),paper_bgcolor="rgba(0,0,0,0)",plot_bgcolor="#fff",font=dict(family="Segoe UI",color="#12344d",size=11),hoverlabel=dict(bgcolor="#12344d",font_color="#fff"),showlegend=False)
     return fig
-
 
 def trend_figure(df,x_col):
-    fig=_fig_base("📈 Ticket Volume Trend",370)
-    x=df[x_col].astype(str).tolist(); y=pd.to_numeric(df["Total"],errors="coerce").fillna(0).tolist()
-    fig.add_trace(go.Bar(x=x,y=y,name="Tickets",marker=dict(color="#168ba0",line=dict(color="#0d6476",width=1)),text=y,texttemplate="%{text}",textposition="outside",hovertemplate="%{x}<br><b>%{y}</b> tickets<extra></extra>"))
-    fig.add_trace(go.Scatter(x=x,y=y,mode="lines+markers",name="Trend",line=dict(color="#ef7d2b",width=3),marker=dict(size=7,color="#ef7d2b",line=dict(color="#fff",width=2)),hoverinfo="skip"))
-    fig.update_yaxes(title="Tickets",rangemode="tozero")
+    fig=_fig("📈 Ticket Volume Trend",365);x=df[x_col].astype(str);y=pd.to_numeric(df["Total"],errors="coerce").fillna(0)
+    fig.add_trace(go.Bar(x=x,y=y,marker=dict(color="#168ba0",line=dict(color="#0d6476",width=1)),text=y,texttemplate="%{text}",textposition="outside",hovertemplate="%{x}<br><b>%{y}</b> tickets<extra></extra>"))
+    fig.add_trace(go.Scatter(x=x,y=y,mode="lines+markers",line=dict(color="#ef7d2b",width=3),marker=dict(size=7,color="#ef7d2b",line=dict(color="#fff",width=2)),hoverinfo="skip"))
+    if "Parents" in df:fig.add_trace(go.Scatter(x=x,y=pd.to_numeric(df["Parents"],errors="coerce").fillna(0),name="Parent",mode="lines+markers",line=dict(color="#79a84a",width=2),marker=dict(size=6)))
+    if "Children" in df:fig.add_trace(go.Scatter(x=x,y=pd.to_numeric(df["Children"],errors="coerce").fillna(0),name="Child",mode="lines+markers",line=dict(color="#d65f2b",width=2),marker=dict(size=6)))
+    fig.update_layout(showlegend=True,legend=dict(orientation="h",y=1.02,x=0,font=dict(size=10)));fig.update_yaxes(title="Tickets",rangemode="tozero",gridcolor="#e4eef1");fig.update_xaxes(showgrid=False,tickangle=-30)
     return fig
 
-
-def horizontal_bar(labels,values,title,color="#168ba0",height=360,suffix=""):
-    pairs=sorted(zip(labels,values),key=lambda x:x[1])[-12:]
-    labs=[str(x[0]) for x in pairs];vals=[_safe_int(x[1]) for x in pairs]
-    fig=_fig_base(title,height)
-    fig.add_trace(go.Bar(y=labs,x=vals,orientation="h",marker=dict(color=color,line=dict(color="#fff",width=1)),text=vals,texttemplate="%{text}"+suffix,textposition="outside",hovertemplate="%{y}<br><b>%{x}</b>"+suffix+"<extra></extra>"))
-    fig.update_xaxes(title="Count",rangemode="tozero",showgrid=True,gridcolor="#e4eef1")
-    fig.update_yaxes(title="",showgrid=False,automargin=True)
-    return fig
-
+def horizontal_bar(labels,values,title,color,height=360,suffix=""):
+    pairs=sorted([(str(a),_safe_int(b)) for a,b in zip(labels,values)],key=lambda x:x[1])[-12:];labs=[a for a,b in pairs];vals=[b for a,b in pairs]
+    fig=_fig(title,height);fig.add_trace(go.Bar(y=labs,x=vals,orientation="h",marker=dict(color=color,line=dict(color="#fff",width=1)),text=vals,texttemplate="%{text}"+suffix,textposition="outside",cliponaxis=False,hovertemplate="%{y}<br><b>%{x}</b>"+suffix+"<extra></extra>"));fig.update_xaxes(title="Count",rangemode="tozero",gridcolor="#e4eef1");fig.update_yaxes(showgrid=False,automargin=True);return fig
 
 def alert_summary_figure(df):
-    d=df.head(12).copy();d["Label"]=d["Tower"].astype(str)+" → "+d["Track"].astype(str);d=d.iloc[::-1]
-    fig=_fig_base("⚡ Alerts by Tower / Track",420)
+    d=df.head(12).copy();d["Label"]=d["Tower"].astype(str)+" → "+d["Track"].astype(str);d=d.iloc[::-1];fig=_fig("⚡ Alert Severity by Tower / Track",410)
     for col,label,color in [("Critical","Critical","#c91f2b"),("High","High","#ee7d2b"),("Moderate","Moderate","#d2a63a")]:
-        if col in d.columns:fig.add_trace(go.Bar(y=d["Label"],x=pd.to_numeric(d[col],errors="coerce").fillna(0),orientation="h",name=label,marker_color=color,text=pd.to_numeric(d[col],errors="coerce").fillna(0).astype(int),texttemplate="%{text}",textposition="inside",hovertemplate=f"%{{y}}<br>{label}: <b>%{{x}}</b><extra></extra>"))
-    fig.update_layout(barmode="stack",showlegend=True,legend=dict(orientation="h",y=1.02,x=0,font=dict(size=10)),margin=dict(l=10,r=18,t=68,b=35))
-    fig.update_xaxes(title="Alerts",rangemode="tozero");fig.update_yaxes(title="",showgrid=False,automargin=True)
-    return fig
-
+        if col in d:fig.add_trace(go.Bar(y=d["Label"],x=pd.to_numeric(d[col],errors="coerce").fillna(0),name=label,orientation="h",marker_color=color,text=pd.to_numeric(d[col],errors="coerce").fillna(0).astype(int),textposition="inside",hovertemplate=f"%{{y}}<br>{label}: <b>%{{x}}</b><extra></extra>"))
+    fig.update_layout(barmode="stack",showlegend=True,legend=dict(orientation="h",y=1.02,x=0,font=dict(size=10)));fig.update_xaxes(title="Alerts",rangemode="tozero",gridcolor="#e4eef1");fig.update_yaxes(showgrid=False,automargin=True);return fig
 
 r=role();title="Supervisor Dashboard" if r=="SUPERVISOR" else "Manager Dashboard" if r=="MANAGER" else "Superuser Dashboard"
 st.markdown(f'<div class="qbr-hero"><h1>📊 QBR Executive Dashboard</h1><p>HCLTech Customer Operations Command Center &nbsp;•&nbsp; <b>{title}</b> &nbsp;•&nbsp; Signed in: <b>{dname()}</b> &nbsp;•&nbsp; Role: <b>{r}</b></p></div>',unsafe_allow_html=True)
 
 if st.session_state.get("show_change_password",False):
-    st.markdown('<div class="qbr-card" style="max-width:620px;margin:4vh auto;padding:30px;">',unsafe_allow_html=True)
-    st.markdown(f'<h1 style="text-align:center;color:#12344d;">🔐 Change Password</h1><p style="text-align:center;color:#557789;">Account: <b>{dname()}</b></p>',unsafe_allow_html=True)
-    current_pw=st.text_input("🔐 Current Password",type="password",key="cp_current",label_visibility="visible")
-    new_pw=st.text_input("🔑 New Password",type="password",key="cp_new",label_visibility="visible")
-    confirm_pw=st.text_input("✅ Confirm New Password",type="password",key="cp_confirm",label_visibility="visible")
-    a,b=st.columns(2)
+    st.markdown('<div class="qbr-card" style="max-width:620px;margin:4vh auto;padding:28px;">',unsafe_allow_html=True);st.markdown(f'<h1 style="text-align:center;color:#12344d;">🔐 Change Password</h1><p style="text-align:center;color:#557789;">Account: <b>{dname()}</b></p>',unsafe_allow_html=True)
+    current_pw=st.text_input("🔐 Current Password",type="password",key="cp_current");new_pw=st.text_input("🔑 New Password",type="password",key="cp_new");confirm_pw=st.text_input("✅ Confirm New Password",type="password",key="cp_confirm");a,b=st.columns(2)
     with a:
         if st.button("🔐 UPDATE PASSWORD",use_container_width=True):
-            if not (len(new_pw)>=8 and any(c.isupper() for c in new_pw) and any(c.islower() for c in new_pw) and any(c.isdigit() for c in new_pw)):msg("bad","Password policy failed.","Use 8+ characters with uppercase, lowercase and a number.")
+            if not(len(new_pw)>=8 and any(c.isupper() for c in new_pw) and any(c.islower() for c in new_pw) and any(c.isdigit() for c in new_pw)):msg("bad","Password policy failed.","Use 8+ characters with uppercase, lowercase and a number.")
             elif new_pw!=confirm_pw:msg("bad","Passwords do not match.")
             else:
                 db=SessionLocal()
@@ -239,20 +195,18 @@ with st.sidebar:
     if st.button("🔄 Pull / Refresh Data",use_container_width=True):st.cache_data.clear();st.rerun()
     if st.button("🔐 Change Password",use_container_width=True):st.session_state.show_change_password=True;st.rerun()
     if st.button("🚪 Sign out",use_container_width=True):clear_session();st.rerun()
-    st.divider()
-    allowed=assigned_tracks(uname()) if r=="MANAGER" else []
+    st.divider();allowed=assigned_tracks(uname()) if r=="MANAGER" else []
     tower_options=sorted({x[0] for x in allowed}) if r=="MANAGER" else sorted(hierarchy.keys())
     st.markdown('<div class="qbr-side-head">1️⃣ TOWER</div>',unsafe_allow_html=True);tower=st.selectbox("Tower",["All"]+tower_options,label_visibility="collapsed",key="scope_tower")
     tracks=sorted({d["TrackName"] for v in hierarchy.values() for d in v}) if tower=="All" else [d["TrackName"] for d in hierarchy.get(tower,[])]
     st.markdown('<div class="qbr-side-head">2️⃣ TRACK</div>',unsafe_allow_html=True);track=st.selectbox("Track",["All"]+tracks,label_visibility="collapsed",key="scope_track")
-    st.markdown('<div class="qbr-side-head">3️⃣ TIME VIEW</div>',unsafe_allow_html=True);view=st.selectbox("Time View",["Day","Week","Month","Quarter"],index=0,label_visibility="collapsed",key="scope_view")
+    st.markdown('<div class="qbr-side-head">3️⃣ TIME VIEW</div>',unsafe_allow_html=True);view=st.selectbox("Time View",["Day","Week","Month","Quarter"],key="scope_view")
     st.markdown('<div class="qbr-side-head">📅 REPORT DATE RANGE</div>',unsafe_allow_html=True);dr=st.date_input("Report Date Range",value=(date(2026,7,15),date.today()),min_value=date(2020,1,1),max_value=date.today(),label_visibility="collapsed",key="scope_dates")
 
 start=end=None
 if isinstance(dr,(tuple,list)) and len(dr)==2:start,end=dr[0],dr[1]
 elif isinstance(dr,date):start=end=dr
-if r=="MANAGER" and len(allowed)==1:
-    tower=allowed[0][0] if tower=="All" else tower;track=allowed[0][1] if track=="All" else track
+if r=="MANAGER" and len(allowed)==1:tower=allowed[0][0] if tower=="All" else tower;track=allowed[0][1] if track=="All" else track
 scope_tower=None if tower=="All" else tower;scope_track=None if track=="All" else track
 
 k=get_executive_kpis(start,end,scope_tower,scope_track);alerts_total=get_alert_total(start,end,scope_tower,scope_track);vol=get_tower_track_volume(start,end,scope_tower,scope_track);stats=get_volume_stats(start,end,scope_tower,scope_track);alerts=get_alert_frequency(start,end,scope_tower,scope_track);pc_df,children_df=get_parent_child_relation(start,end,scope_tower,scope_track);alert_summary=get_tower_track_alerts(start,end,scope_tower,scope_track)
@@ -267,22 +221,19 @@ elif view=="Week":trend=get_weekly_trend(start,end,scope_tower,scope_track);x="W
 elif view=="Month":trend=get_monthly_trend(start,end,scope_tower,scope_track);x="Month"
 else:trend=get_quarterly_trend(start,end,scope_tower,scope_track);x="Quarter"
 
-st.markdown('<div class="qbr-section">📈 Executive Volume & Trend</div>',unsafe_allow_html=True)
-a,b=st.columns([1.45,1])
+st.markdown('<div class="qbr-section">📈 Executive Volume & Trend</div>',unsafe_allow_html=True);a,b=st.columns([1.45,1])
 with a:
     if not trend.empty:st.plotly_chart(trend_figure(trend,x),use_container_width=True,config={"displayModeBar":False})
     else:msg("inf","No ticket trend data.","Try a wider date range.")
 with b:
     if not vol.empty:
-        d=vol.head(12).copy();d["Label"]=d["Tower"].astype(str)+" → "+d["Track"].astype(str);st.plotly_chart(horizontal_bar(d["Label"].tolist(),d["Total"].tolist(),"🏢 Tower / Track Ticket Volume","#188da1",390," tickets"),use_container_width=True,config={"displayModeBar":False})
+        d=vol.head(12).copy();d["Label"]=d["Tower"].astype(str)+" → "+d["Track"].astype(str);st.plotly_chart(horizontal_bar(d["Label"].tolist(),d["Total"].tolist(),"🏢 Ticket Volume by Tower → Track","#188da1",390," tickets"),use_container_width=True,config={"displayModeBar":False})
     else:msg("inf","No Tower / Track ticket volume.","No ticket rows match the selected filters.")
 
-st.markdown('<div class="qbr-section">👑 Parent-Child & Alert Analysis</div>',unsafe_allow_html=True)
-a,b=st.columns(2)
+st.markdown('<div class="qbr-section">👑 Parent-Child & Alert Analysis</div>',unsafe_allow_html=True);a,b=st.columns(2)
 with a:
     if not pc_df.empty:
-        d=pc_df.head(10);st.plotly_chart(horizontal_bar(d["ParentTicket"].astype(str).tolist(),d["ChildCount"].tolist(),"👑 Parent → Child Concentration","#7b6848",390," child"),use_container_width=True,config={"displayModeBar":False})
-        st.markdown(f'<span class="qbr-pill" style="background:#e8f4ff;color:#155486;">{len(children_df)} child records</span><span class="qbr-pill" style="background:#e9faef;color:#17613a;">{len(pc_df)} parent groups</span>',unsafe_allow_html=True)
+        d=pc_df.head(10);st.plotly_chart(horizontal_bar(d["ParentTicket"].astype(str).tolist(),d["ChildCount"].tolist(),"👑 Parent → Child Concentration","#7b6848",390," child"),use_container_width=True,config={"displayModeBar":False});st.markdown(f'<span class="qbr-pill" style="background:#e8f4ff;color:#155486;">{len(children_df)} child records</span><span class="qbr-pill" style="background:#e9faef;color:#17613a;">{len(pc_df)} parent groups</span>',unsafe_allow_html=True)
         with st.expander("🔍 View exact parent → child relationships"):st.dataframe(children_df,use_container_width=True,hide_index=True)
     else:msg("inf","No parent-child relationship rows.","The selected scope returned no Child tickets with ParentTicketNumber.")
 with b:
@@ -292,17 +243,14 @@ with b:
 
 st.markdown('<div class="qbr-section">⚡ Tower / Track Alert Summary</div>',unsafe_allow_html=True)
 if not alert_summary.empty:
-    st.plotly_chart(alert_summary_figure(alert_summary),use_container_width=True,config={"displayModeBar":False})
-    d=alert_summary.head(15).copy();st.dataframe(d[["Tower","Track","TotalAlerts","Critical","High","Moderate"]],use_container_width=True,hide_index=True)
+    st.plotly_chart(alert_summary_figure(alert_summary),use_container_width=True,config={"displayModeBar":False});d=alert_summary.head(15);st.dataframe(d[["Tower","Track","TotalAlerts","Critical","High","Moderate"]],use_container_width=True,hide_index=True)
 else:msg("inf","No Tower / Track alert rows.","No alert rows match the selected filters.")
 
 if r in ("SUPERUSER","SUPERVISOR"):
-    st.markdown('<div class="qbr-section">👥 Manager & Role Administration</div>',unsafe_allow_html=True)
-    st.caption("Assignment rule: one manager per Tower → Track, and one Tower → Track per manager.")
+    st.markdown('<div class="qbr-section">👥 Manager & Role Administration</div>',unsafe_allow_html=True);st.caption("Assignment rule: one manager per Tower → Track, and one Tower → Track per manager.")
     users=manager_users();active_managers=[u for u in users if str(u["RoleName"]).upper()=="MANAGER"];towers=sorted(hierarchy.keys())
     if towers and active_managers:
-        tsel=st.selectbox("Tower",towers,key="admin_tower");trsel=st.selectbox("Track",[d["TrackName"] for d in hierarchy.get(tsel,[])],key="admin_track");msel=st.selectbox("Manager",[u["Username"] for u in active_managers],format_func=lambda x:next((f'{u["DisplayName"]} • {u["RoleName"]}' for u in active_managers if u["Username"]==x),x),key="admin_manager")
-        aa,bb,cc=st.columns(3)
+        tsel=st.selectbox("Tower",towers,key="admin_tower");trsel=st.selectbox("Track",[d["TrackName"] for d in hierarchy.get(tsel,[])],key="admin_track");msel=st.selectbox("Manager",[u["Username"] for u in active_managers],format_func=lambda x:next((f'{u["DisplayName"]} • {u["RoleName"]}' for u in active_managers if u["Username"]==x),x),key="admin_manager");aa,bb,cc=st.columns(3)
         with aa:
             if st.button("➕ Assign Manager",use_container_width=True):
                 ok,detail=assign_manager(msel,tsel,trsel);msg("ok" if ok else "bad","Assignment successful." if ok else "Assignment failed.",detail)
@@ -329,4 +277,4 @@ buf=io.BytesIO()
 with pd.ExcelWriter(buf,engine="openpyxl") as writer:
     summary.to_excel(writer,index=False,sheet_name="Executive Summary");trend.to_excel(writer,index=False,sheet_name="Ticket Trend");vol.to_excel(writer,index=False,sheet_name="Tower Track Volume");alerts.to_excel(writer,index=False,sheet_name="Alert Frequency");pc_df.to_excel(writer,index=False,sheet_name="Parent Child");alert_summary.to_excel(writer,index=False,sheet_name="Alert Summary")
 st.download_button("📗 Download Excel Analysis Pack",buf.getvalue(),"QBR_Executive_Analysis.xlsx","application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",use_container_width=True)
-st.caption("The Excel pack contains separate analysis sheets suitable for Power Query / Power Pivot modelling. The Streamlit dashboard remains the live CPDB view.")
+st.caption("Excel Analysis Pack is structured for Excel Power Query / Power Pivot modelling; Streamlit remains the live CPDB dashboard.")
