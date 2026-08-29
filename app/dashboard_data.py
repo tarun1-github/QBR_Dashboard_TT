@@ -38,11 +38,11 @@ def _ticket_context(db, alias: str = "tk"):
     tf=f"CASE WHEN UPPER(COALESCE({ag},'')) LIKE '%FN-SFNOC%' OR UPPER(COALESCE({ag},'')) LIKE '%FN-THD%' OR UPPER(COALESCE({ag},'')) LIKE '%HSBC-DATA%' THEN 'Foundation' ELSE NULL END"
     trf=f"CASE WHEN UPPER(COALESCE({ag},'')) LIKE '%FN-SFNOC%' THEN 'SFNOC' WHEN UPPER(COALESCE({ag},'')) LIKE '%FN-THD%' OR UPPER(COALESCE({ag},'')) LIKE '%JLK%' THEN 'THD Data' WHEN UPPER(COALESCE({ag},'')) LIKE '%HSBC-DATA%' THEN 'HSBC Data' ELSE NULL END"
     tp=[]; rp=[]
-    if "ProjectName" in cols: tp.append(f"NULLIF(LTRIM(RTRIM({alias}.ProjectName)),'')")
+    if "ProjectName" in cols: tp.append(f"NULLIF(NULLIF(LTRIM(RTRIM({alias}.ProjectName)),''),'Unknown')")
     if has_tower: tp.append("t.TowerName")
     if has_tt: tp.append("tt.TowerName")
     tp.append(tf)
-    if "TrackName" in cols: rp.append(f"NULLIF(LTRIM(RTRIM({alias}.TrackName)),'')")
+    if "TrackName" in cols: rp.append(f"NULLIF(NULLIF(LTRIM(RTRIM({alias}.TrackName)),''),'Unknown')")
     if has_track: rp.append("tr.TrackName")
     if has_tt: rp.append("tt.TrackName")
     rp.append(trf)
@@ -63,11 +63,11 @@ def _alert_context(db, alias: str = "a"):
     tower_fallback = f"CASE WHEN UPPER(COALESCE({assignment},'')) LIKE '%FN-SFNOC%' OR UPPER(COALESCE({assignment},'')) LIKE '%FN-THD%' OR UPPER(COALESCE({assignment},'')) LIKE '%HSBC-DATA%' THEN 'Foundation' ELSE NULL END"
     track_fallback = f"CASE WHEN UPPER(COALESCE({assignment},'')) LIKE '%FN-SFNOC%' THEN 'SFNOC' WHEN UPPER(COALESCE({assignment},'')) LIKE '%FN-THD%' OR UPPER(COALESCE({assignment},'')) LIKE '%JLK%' THEN 'THD Data' WHEN UPPER(COALESCE({assignment},'')) LIKE '%HSBC-DATA%' THEN 'HSBC Data' ELSE NULL END"
     tower_parts=[]; track_parts=[]
-    if "ProjectName" in cols: tower_parts.append(f"NULLIF(LTRIM(RTRIM({alias}.ProjectName)),'')")
+    if "ProjectName" in cols: tower_parts.append(f"NULLIF(NULLIF(LTRIM(RTRIM({alias}.ProjectName)),''),'Unknown')")
     if has_tower: tower_parts.append("t.TowerName")
     if has_tt: tower_parts.append("tt.TowerName")
     tower_parts.append(tower_fallback)
-    if "TrackName" in cols: track_parts.append(f"NULLIF(LTRIM(RTRIM({alias}.TrackName)),'')")
+    if "TrackName" in cols: track_parts.append(f"NULLIF(NULLIF(LTRIM(RTRIM({alias}.TrackName)),''),'Unknown')")
     if has_track: track_parts.append("tr.TrackName")
     if has_tt: track_parts.append("tt.TrackName")
     track_parts.append(track_fallback)
