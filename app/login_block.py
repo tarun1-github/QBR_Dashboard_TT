@@ -13,32 +13,34 @@ COOKIE_NAME="qbr_auth"
 COOKIE_SECRET=os.getenv("QBR_COOKIE_SECRET","change-this-qbr-cookie-secret")
 COOKIE_DAYS=30
 
+@st.cache_resource(show_spinner=False)
 def _cm():
     if stx is None:return None
-    if "_qbr_cm" not in st.session_state: st.session_state["_qbr_cm"]=stx.CookieManager(key="qbr_auth_cookie_manager")
-    return st.session_state["_qbr_cm"]
+    return stx.CookieManager(key="qbr_auth_cookie_manager")
 
 def _token(username,issued=None):
-    issued=int(issued or time.time()); payload=f"{username}|{issued}"
-    sig=hmac.new(COOKIE_SECRET.encode(),payload.encode(),hashlib.sha256).hexdigest()
-    return f"{payload}|{sig}"
+    issued=int(issued or time.time());payload=f"{username}|{issued}";sig=hmac.new(COOKIE_SECRET.encode(),payload.encode(),hashlib.sha256).hexdigest();return f"{payload}|{sig}"
 
 def _username_from_token(value):
     try:
-        username,issued,sig=value.split("|",2); issued=int(issued)
+        username,issued,sig=value.split("|",2);issued=int(issued)
         if not username or time.time()-issued>COOKIE_DAYS*86400:return None
         expected=hmac.new(COOKIE_SECRET.encode(),f"{username}|{issued}".encode(),hashlib.sha256).hexdigest()
         return username if hmac.compare_digest(sig,expected) else None
     except Exception:return None
 
 def _save_cookie(user):
-    cm=_cm(); username=str(user.get("Username","")).strip() if user else ""
-    if cm and username: cm.set(COOKIE_NAME,_token(username),key="qbr_auth_set",path="/",expires_at=datetime.now()+timedelta(days=COOKIE_DAYS),same_site="lax")
+    cm=_cm();username=str(user.get("Username","")).strip() if user else ""
+    if cm and username:
+        cm.set(COOKIE_NAME,_token(username),key="qbr_auth_set",path="/",expires_at=datetime.now()+timedelta(days=COOKIE_DAYS),same_site="lax")
 
 def _read_cookie():
     cm=_cm()
     if not cm:return None
-    try:return _username_from_token(cm.get(COOKIE_NAME) or "")
+    try:
+        cookies=cm.get_all(key="qbr_auth_read")
+        if cookies is None:return None
+        return _username_from_token(cookies.get(COOKIE_NAME) or "")
     except Exception:return None
 
 def _delete_cookie():
@@ -48,11 +50,10 @@ def _delete_cookie():
         except Exception:pass
 
 def valid_password(p):
-    p=p or ""; return len(p)>=8 and any(c.isupper() for c in p) and any(c.islower() for c in p) and any(c.isdigit() for c in p)
+    p=p or "";return len(p)>=8 and any(c.isupper() for c in p) and any(c.islower() for c in p) and any(c.isdigit() for c in p)
 
 def _toast(kind,title,detail=""):
-    icon={"ok":"✓","bad":"!","info":"i"}.get(kind,"i")
-    st.markdown(f'<div class="qbr-toast {kind}"><b class="qbr-toast-icon">{icon}</b><div><b>{title}</b><span>{detail}</span></div></div>',unsafe_allow_html=True)
+    icon={"ok":"✓","bad":"!","info":"i"}.get(kind,"i");st.markdown(f'<div class="qbr-toast {kind}"><b class="qbr-toast-icon">{icon}</b><div><b>{title}</b><span>{detail}</span></div></div>',unsafe_allow_html=True)
 
 def success_message(t,d=""): _toast("ok",t,d)
 def error_message(t,d=""): _toast("bad",t,d)
@@ -80,6 +81,10 @@ def clear_session():
     """Only explicit Sign out calls this; browser refresh never clears the cookie."""
     _delete_cookie();st.session_state.user=None;st.session_state.auth_mode="login";st.session_state.pending_alias="";st.session_state.flash_message=None;st.session_state.show_change_password=False
 
+def _logout_to_login():
+    """Return to login without deleting a newly-created password reset success message."""
+    _delete_cookie();st.session_state.user=None;st.session_state.auth_mode="login";st.session_state.pending_alias="";st.session_state.show_change_password=False
+
 def render_flash():
     m=st.session_state.pop("flash_message",None)
     if m:success_message(m[0],m[1] if len(m)>1 else "")
@@ -93,18 +98,13 @@ def _brand():st.markdown('<div class="qbr-login-wrap"><div class="qbr-auth-brand
 
 def _fields(prefix,current=False):
     cur=""
-    if current:
-        st.markdown('<div class="qbr-auth-label current">🔐 Current Password</div>',unsafe_allow_html=True);cur=st.text_input("Current Password",type="password",label_visibility="collapsed",key=f"{prefix}_current")
+    if current:st.markdown('<div class="qbr-auth-label current">🔐 Current Password</div>',unsafe_allow_html=True);cur=st.text_input("Current Password",type="password",label_visibility="collapsed",key=f"{prefix}_current")
     st.markdown('<div class="qbr-auth-label new">🔑 New Password</div>',unsafe_allow_html=True);p1=st.text_input("New Password",type="password",label_visibility="collapsed",key=f"{prefix}_new")
     st.markdown('<div class="qbr-auth-label confirm">✅ Confirm New Password</div>',unsafe_allow_html=True);p2=st.text_input("Confirm New Password",type="password",label_visibility="collapsed",key=f"{prefix}_confirm")
-    st.markdown('<div class="qbr-password-rule">Password must contain <b>8+ characters</b>, uppercase, lowercase and a number.</div>',unsafe_allow_html=True)
-    return cur,p1,p2
+    st.markdown('<div class="qbr-password-rule">Password must contain <b>8+ characters</b>, uppercase, lowercase and a number.</div>',unsafe_allow_html=True);return cur,p1,p2
 
 def _login():
-    st.markdown('<div class="qbr-auth-card"><div class="qbr-auth-title">🔐 Sign in</div><div class="qbr-auth-sub">Secure access to live QBR ticket and alert analytics.</div></div>',unsafe_allow_html=True)
-    st.markdown('<div class="qbr-auth-label user">👤 Username</div>',unsafe_allow_html=True);username=st.text_input("Username",label_visibility="collapsed",key="login_username")
-    st.markdown('<div class="qbr-auth-label pass">🔒 Password</div>',unsafe_allow_html=True);password=st.text_input("Password",type="password",label_visibility="collapsed",key="login_password")
-    st.markdown('<div class="qbr-auth-primary">',unsafe_allow_html=True);clicked=st.button("🔐 LOGIN",use_container_width=True,key="login_button");st.markdown('</div>',unsafe_allow_html=True)
+    st.markdown('<div class="qbr-auth-card"><div class="qbr-auth-title">🔐 Sign in</div><div class="qbr-auth-sub">Secure access to live QBR ticket and alert analytics.</div></div>',unsafe_allow_html=True);st.markdown('<div class="qbr-auth-label user">👤 Username</div>',unsafe_allow_html=True);username=st.text_input("Username",label_visibility="collapsed",key="login_username");st.markdown('<div class="qbr-auth-label pass">🔒 Password</div>',unsafe_allow_html=True);password=st.text_input("Password",type="password",label_visibility="collapsed",key="login_password");st.markdown('<div class="qbr-auth-primary">',unsafe_allow_html=True);clicked=st.button("🔐 LOGIN",use_container_width=True,key="login_button");st.markdown('</div>',unsafe_allow_html=True)
     a,b=st.columns(2)
     with a:
         if st.button("Set My Password",use_container_width=True,key="set_my_password_link"):
@@ -147,7 +147,10 @@ def render_login():
                     elif p1!=p2:error_message("Passwords do not match.")
                     else:
                         db=SessionLocal()
-                        try:set_password(db,account["UserID"],p1);db.commit();fresh=get_user(db,alias);_set_authenticated_user(fresh);st.session_state.flash_message=("Password set successfully.","Welcome to the QBR Executive Dashboard.");st.rerun()
+                        try:
+                            set_password(db,account["UserID"],p1);db.commit();fresh=get_user(db,alias)
+                            if not fresh:raise RuntimeError("Account could not be reloaded after password update.")
+                            _set_authenticated_user(fresh);st.session_state.flash_message=("Password set successfully.","Welcome to the QBR Executive Dashboard.");st.rerun()
                         except Exception as exc:db.rollback();error_message("Unable to set password.",str(exc))
                         finally:db.close()
             if st.button("← Back to Login",use_container_width=True,key="set_back"):clear_session();st.rerun()
@@ -161,7 +164,8 @@ def render_login():
                 db=SessionLocal()
                 try:
                     ok,detail=reset_password_self_service(db,alias.strip(),display.strip(),p1)
-                    if ok:db.commit();st.session_state.flash_message=("Password reset successfully.","You can now sign in with your new password.");clear_session();st.rerun()
+                    if ok:
+                        db.commit();_logout_to_login();st.session_state.flash_message=("Password reset successfully.","You can now sign in with your new password.");st.rerun()
                     db.rollback();error_message("Password reset failed.",detail)
                 except Exception as exc:db.rollback();error_message("Unable to reset password.",str(exc))
                 finally:db.close()
