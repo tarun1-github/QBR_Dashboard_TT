@@ -10,6 +10,7 @@ import streamlit as st
 from sqlalchemy import text
 
 from app.db import SessionLocal
+from app.auth import change_password
 from app.login_block import render_login, render_flash, initialise_auth_state, clear_session
 from app.dashboard_data import (
     get_tower_track_hierarchy, get_executive_kpis, get_alert_total,
@@ -120,14 +121,45 @@ def update_role(username,new_role):
 r=role(); title="Supervisor Dashboard" if r=="SUPERVISOR" else "Manager Dashboard" if r=="MANAGER" else "Superuser Dashboard"
 st.markdown(f'<div class="qbr-hero"><h1>📊 QBR Executive Dashboard</h1><p>HCLTech Customer Operations Command Center &nbsp;•&nbsp; <b>{title}</b> &nbsp;•&nbsp; Signed in: <b>{dname()}</b> &nbsp;•&nbsp; Role: <b>{r}</b></p></div>',unsafe_allow_html=True)
 
+if st.session_state.get("show_change_password", False):
+    st.markdown('<div style="max-width:560px;margin:7vh auto 0;padding:30px 36px;border-radius:28px;background:linear-gradient(145deg,#fff,#eaf5f7);box-shadow:16px 16px 34px rgba(15,39,66,.18),-8px -8px 20px #fff;border:1px solid #d7e6ea;">',unsafe_allow_html=True)
+    st.markdown('<h1 style="text-align:center;color:#12344d;">🔐 Change Password</h1>',unsafe_allow_html=True)
+    st.markdown(f'<p style="text-align:center;color:#557789;">Account: <b>{dname()}</b></p>',unsafe_allow_html=True)
+    current_pw=st.text_input("Current Password",type="password",key="cp_current",placeholder="")
+    new_pw=st.text_input("New Password",type="password",key="cp_new",placeholder="")
+    confirm_pw=st.text_input("Confirm New Password",type="password",key="cp_confirm",placeholder="")
+    cpa,cpb=st.columns(2)
+    with cpa:
+        if st.button("🔐 Update Password",use_container_width=True,key="cp_update"):
+            valid=len(new_pw)>=8 and any(c.isupper() for c in new_pw) and any(c.islower() for c in new_pw) and any(c.isdigit() for c in new_pw)
+            if not valid: msg("bad","Password policy failed.","Use 8+ characters with uppercase, lowercase and a number.")
+            elif new_pw!=confirm_pw: msg("bad","Passwords do not match.")
+            else:
+                db=SessionLocal()
+                try:
+                    if change_password(db,user()["UserID"],current_pw,new_pw):
+                        msg("ok","Password changed successfully.")
+                        st.session_state.show_change_password=False
+                        st.rerun()
+                    else: msg("bad","Current password is incorrect.")
+                except Exception as exc:
+                    db.rollback(); msg("bad","Unable to change password.",str(exc))
+                finally: db.close()
+    with cpb:
+        if st.button("← Back to Dashboard",use_container_width=True,key="cp_back"):
+            st.session_state.show_change_password=False; st.rerun()
+    st.markdown('</div>',unsafe_allow_html=True)
+    st.stop()
+
 hierarchy=get_tower_track_hierarchy()
 with st.sidebar:
     st.markdown('<div class="qbr-side-title">🎛️ QBR DASHBOARD CONTROLS</div>',unsafe_allow_html=True)
     if st.button("🔄 Pull / Refresh Data",use_container_width=True): st.cache_data.clear(); st.rerun()
-    if st.button("🔐 Change Password",use_container_width=True): st.session_state.auth_mode="change"; st.rerun()
+    if st.button("🔐 Change Password",use_container_width=True): st.session_state.show_change_password=True; st.rerun()
     if st.button("🚪 Sign out",use_container_width=True): clear_session(); st.rerun()
     st.divider()
     allowed=assigned_tracks(uname()) if r=="MANAGER" else []
+    if r=="MANAGER" and not allowed: st.markdown('<div class="qbr-msg inf">i&nbsp;&nbsp;<b>No track is assigned to this manager.</b> Ask a supervisor to assign one track.</div>',unsafe_allow_html=True)
     tower_options=sorted({x[0] for x in allowed}) if r=="MANAGER" else list(hierarchy.keys())
     tower=st.selectbox("1️⃣ TOWER",["All"]+tower_options,label_visibility="visible")
     if tower=="All": tracks=sorted({d["TrackName"] for v in hierarchy.values() for d in v})
