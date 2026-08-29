@@ -78,11 +78,9 @@ def _ticket_context(db, alias: str = "tk"):
         joins += f" LEFT JOIN qbr.Track tr ON tr.TrackID={alias}.TrackID"
     if has_tt:
         joins += f" LEFT JOIN qbr.TowerTrack tt ON tt.TowerTrackID={alias}.TowerTrackID"
-
     ag = f"NULLIF(LTRIM(RTRIM({alias}.AssignmentGroup)),'')" if "AssignmentGroup" in cols else "NULL"
     mapped_track = _assignment_track_case(ag)
     catalog_track = _catalog_track_case(db, ag)
-
     track_parts = []
     if "TrackName" in cols:
         track_parts.append(f"NULLIF(NULLIF(LTRIM(RTRIM({alias}.TrackName)),''),'Unknown')")
@@ -92,7 +90,6 @@ def _ticket_context(db, alias: str = "tk"):
         track_parts.append("NULLIF(NULLIF(LTRIM(RTRIM(tt.TrackName)),''),'Unknown')")
     track_parts.extend([f"NULLIF({mapped_track},'Unknown')", f"NULLIF({catalog_track},'Unknown')"])
     track_expr = "COALESCE(" + ",".join(track_parts) + ",'Unknown')"
-
     tower_parts = []
     if "ProjectName" in cols:
         tower_parts.append(f"NULLIF(NULLIF(LTRIM(RTRIM({alias}.ProjectName)),''),'Unknown')")
@@ -207,17 +204,16 @@ def get_alert_total(start_date=None, end_date=None, tower=None, track=None):
 
 
 def get_tower_track_volume(start_date=None, end_date=None, tower=None, track=None):
-    """Return Tower/Track volume without putting scalar subqueries in GROUP BY.
+    """Resolve Tower/Track in a derived table before aggregation.
 
-    SQL Server rejects GROUP BY expressions that contain a scalar subquery. The
-    mapping layer intentionally uses scalar lookups for historical records, so
-    resolve Tower/Track in a derived table first and aggregate in the outer query.
+    SQL Server does not allow scalar subqueries inside GROUP BY expressions.
+    Historical mapping uses scalar lookups, so aggregate only the resolved
+    aliases in the outer query.
     """
     db = SessionLocal()
     try:
         cols, joins, tower_expr, track_expr, _scope = _ticket_context(db, "tk")
         date_col = "OpenedAt" if "OpenedAt" in cols else "CreatedAt"
-        base_where = _date_filter("tk", date_col)
         q = f"""
         SELECT b.Tower, b.Track,
                COUNT(*) AS Total,
@@ -228,7 +224,7 @@ def get_tower_track_volume(start_date=None, end_date=None, tower=None, track=Non
                    {track_expr} AS Track,
                    tk.TicketType
             FROM qbr.Ticket tk {joins}
-            WHERE {base_where}
+            WHERE {_date_filter('tk',date_col)}
         ) b
         WHERE (:tower IS NULL OR b.Tower=:tower)
           AND (:track IS NULL OR b.Track=:track)
@@ -285,17 +281,56 @@ def get_alert_frequency(start_date=None, end_date=None, tower=None, track=None):
 
 
 def get_parent_child_relation(start_date=None, end_date=None, tower=None, track=None):
+    """Return parent groups and exact child TicketNumber values.
+
+    Like the Tower/Track volume query, this resolves the mapping in a derived
+    table first so SQL Server never has to GROUP BY an expression containing a
+    scalar lookup.
+    """
     db = SessionLocal()
     try:
-        cols, joins, tower_expr, track_expr, scope = _ticket_context(db, "c")
+        cols, joins, tower_expr, track_expr, _scope = _ticket_context(db, "c")
         date_col = "OpenedAt" if "OpenedAt" in cols else "CreatedAt"
         if "ParentTicketNumber" not in cols or "TicketType" not in cols:
             return pd.DataFrame(), pd.DataFrame()
         ticket_id = "CAST(c.TicketNumber AS nvarchar(100))" if "TicketNumber" in cols else ("CAST(c.TicketKey AS nvarchar(100))" if "TicketKey" in cols else "CAST(c.ID AS nvarchar(100))")
-        q = f"SELECT CAST(c.ParentTicketNumber AS nvarchar(255)) ParentTicket,{tower_expr} Tower,{track_expr} Track,COUNT(*) ChildCount,MAX(c.Priority) Priority,MAX(c.State) State FROM qbr.Ticket c {joins} WHERE UPPER(ISNULL(c.TicketType,''))='CHILD' AND c.ParentTicketNumber IS NOT NULL AND {_date_filter('c',date_col)} AND {scope} GROUP BY CAST(c.ParentTicketNumber AS nvarchar(255)),{tower_expr},{track_expr} ORDER BY ChildCount DESC"
+        q = f"""
+        SELECT b.ParentTicket,b.Tower,b.Track,COUNT(*) AS ChildCount,
+               MAX(b.Priority) AS Priority,MAX(b.State) AS State
+        FROM (
+            SELECT CAST(c.ParentTicketNumber AS nvarchar(255)) AS ParentTicket,
+                   {tower_expr} AS Tower,
+                   {track_expr} AS Track,
+                   c.Priority,c.State
+            FROM qbr.Ticket c {joins}
+            WHERE UPPER(ISNULL(c.TicketType,''))='CHILD'
+              AND c.ParentTicketNumber IS NOT NULL
+              AND {_date_filter('c',date_col)}
+        ) b
+        WHERE (:tower IS NULL OR b.Tower=:tower)
+          AND (:track IS NULL OR b.Track=:track)
+        GROUP BY b.ParentTicket,b.Tower,b.Track
+        ORDER BY ChildCount DESC
+        """
         rows = db.execute(text(q), _params(start_date, end_date, tower, track)).fetchall()
         parents = pd.DataFrame([{"ParentTicket": r.ParentTicket, "Tower": r.Tower, "Track": r.Track, "ChildCount": _safe_int(r.ChildCount), "Priority": r.Priority, "State": r.State} for r in rows])
-        q2 = f"SELECT {ticket_id} ChildTicket,CAST(c.ParentTicketNumber AS nvarchar(255)) ParentTicket,{tower_expr} Tower,{track_expr} Track,c.Priority,c.State FROM qbr.Ticket c {joins} WHERE UPPER(ISNULL(c.TicketType,''))='CHILD' AND c.ParentTicketNumber IS NOT NULL AND {_date_filter('c',date_col)} AND {scope} ORDER BY c.ParentTicketNumber,{ticket_id}"
+        q2 = f"""
+        SELECT b.ChildTicket,b.ParentTicket,b.Tower,b.Track,b.Priority,b.State
+        FROM (
+            SELECT {ticket_id} AS ChildTicket,
+                   CAST(c.ParentTicketNumber AS nvarchar(255)) AS ParentTicket,
+                   {tower_expr} AS Tower,
+                   {track_expr} AS Track,
+                   c.Priority,c.State
+            FROM qbr.Ticket c {joins}
+            WHERE UPPER(ISNULL(c.TicketType,''))='CHILD'
+              AND c.ParentTicketNumber IS NOT NULL
+              AND {_date_filter('c',date_col)}
+        ) b
+        WHERE (:tower IS NULL OR b.Tower=:tower)
+          AND (:track IS NULL OR b.Track=:track)
+        ORDER BY b.ParentTicket,b.ChildTicket
+        """
         rows2 = db.execute(text(q2), _params(start_date, end_date, tower, track)).fetchall()
         children = pd.DataFrame([{"ChildTicket": r.ChildTicket, "ParentTicket": r.ParentTicket, "Tower": r.Tower, "Track": r.Track, "Priority": r.Priority, "State": r.State} for r in rows2])
         return parents, children
@@ -318,12 +353,12 @@ def get_volume_stats(start_date=None, end_date=None, tower=None, track=None):
 
 
 def get_tower_track_alerts(start_date=None, end_date=None, tower=None, track=None):
-    """Return alert summary with Tower/Track resolved before aggregation."""
+    """Resolve alert Tower/Track before aggregation for SQL Server compatibility."""
     db = SessionLocal()
     try:
         _cols, joins, tower_expr, track_expr, _scope = _alert_context(db, "a")
         q = f"""
-        SELECT b.Tower, b.Track,
+        SELECT b.Tower,b.Track,
                COUNT(*) AS TotalAlerts,
                SUM(CASE WHEN UPPER(ISNULL(b.Severity,'')) LIKE '%CRITICAL%' THEN 1 ELSE 0 END) AS Critical,
                SUM(CASE WHEN UPPER(ISNULL(b.Severity,'')) LIKE '%HIGH%' THEN 1 ELSE 0 END) AS High,
@@ -337,8 +372,8 @@ def get_tower_track_alerts(start_date=None, end_date=None, tower=None, track=Non
         ) b
         WHERE (:tower IS NULL OR b.Tower=:tower)
           AND (:track IS NULL OR b.Track=:track)
-        GROUP BY b.Tower, b.Track
-        ORDER BY TotalAlerts DESC, b.Tower, b.Track
+        GROUP BY b.Tower,b.Track
+        ORDER BY TotalAlerts DESC,b.Tower,b.Track
         """
         rows = db.execute(text(q), _params(start_date, end_date, tower, track)).fetchall()
         return pd.DataFrame([{"Tower": r.Tower, "Track": r.Track, "TotalAlerts": _safe_int(r.TotalAlerts), "Critical": _safe_int(r.Critical), "High": _safe_int(r.High), "Moderate": _safe_int(r.Moderate)} for r in rows])
