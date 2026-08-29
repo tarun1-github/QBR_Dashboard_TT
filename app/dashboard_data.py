@@ -29,30 +29,25 @@ def _date_filter(alias: str, date_col: str) -> str:
 
 
 def _ticket_context(db, alias: str = "tk"):
-    cols = _columns(db, "Ticket")
-    joins = ""
-    has_tower = "TowerID" in cols and _table_exists(db, "Tower")
-    has_track = "TrackID" in cols and _table_exists(db, "Track")
-    has_tt = "TowerTrackID" in cols and _table_exists(db, "TowerTrack")
-    if has_tower: joins += f" LEFT JOIN qbr.Tower t ON t.TowerID={alias}.TowerID"
-    if has_track: joins += f" LEFT JOIN qbr.Track tr ON tr.TrackID={alias}.TrackID"
-    if has_tt: joins += f" LEFT JOIN qbr.TowerTrack tt ON tt.TowerTrackID={alias}.TowerTrackID"
-    assignment = f"NULLIF(LTRIM(RTRIM({alias}.AssignmentGroup)),'')" if "AssignmentGroup" in cols else "NULL"
-    tower_fallback = f"CASE WHEN UPPER(COALESCE({assignment},'')) LIKE '%FN-SFNOC%' OR UPPER(COALESCE({assignment},'')) LIKE '%FN-THD%' OR UPPER(COALESCE({assignment},'')) LIKE '%HSBC-DATA%' THEN 'Foundation' ELSE NULL END"
-    track_fallback = f"CASE WHEN UPPER(COALESCE({assignment},'')) LIKE '%FN-SFNOC%' THEN 'SFNOC' WHEN UPPER(COALESCE({assignment},'')) LIKE '%FN-THD%' OR UPPER(COALESCE({assignment},'')) LIKE '%JLK%' THEN 'THD Data' WHEN UPPER(COALESCE({assignment},'')) LIKE '%HSBC-DATA%' THEN 'HSBC Data' ELSE NULL END"
-    tower_parts=[]; track_parts=[]
-    if "ProjectName" in cols: tower_parts.append(f"NULLIF(LTRIM(RTRIM({alias}.ProjectName)),'')")
-    if has_tower: tower_parts.append("t.TowerName")
-    if has_tt: tower_parts.append("tt.TowerName")
-    tower_parts.append(tower_fallback)
-    if "TrackName" in cols: track_parts.append(f"NULLIF(LTRIM(RTRIM({alias}.TrackName)),'')")
-    if has_track: track_parts.append("tr.TrackName")
-    if has_tt: track_parts.append("tt.TrackName")
-    track_parts.append(track_fallback)
-    tower_expr="COALESCE("+",".join(tower_parts)+",'Unknown')"
-    track_expr="COALESCE("+",".join(track_parts)+",'Unknown')"
-    scope=" AND ".join([f"(:tower IS NULL OR {tower_expr}=:tower)",f"(:track IS NULL OR {track_expr}=:track)"])
-    return cols,joins,tower_expr,track_expr,scope
+    cols=_columns(db,"Ticket"); joins=""
+    has_tower="TowerID" in cols and _table_exists(db,"Tower"); has_track="TrackID" in cols and _table_exists(db,"Track"); has_tt="TowerTrackID" in cols and _table_exists(db,"TowerTrack")
+    if has_tower: joins+=f" LEFT JOIN qbr.Tower t ON t.TowerID={alias}.TowerID"
+    if has_track: joins+=f" LEFT JOIN qbr.Track tr ON tr.TrackID={alias}.TrackID"
+    if has_tt: joins+=f" LEFT JOIN qbr.TowerTrack tt ON tt.TowerTrackID={alias}.TowerTrackID"
+    ag=f"NULLIF(LTRIM(RTRIM({alias}.AssignmentGroup)),'')" if "AssignmentGroup" in cols else "NULL"
+    tf=f"CASE WHEN UPPER(COALESCE({ag},'')) LIKE '%FN-SFNOC%' OR UPPER(COALESCE({ag},'')) LIKE '%FN-THD%' OR UPPER(COALESCE({ag},'')) LIKE '%HSBC-DATA%' THEN 'Foundation' ELSE NULL END"
+    trf=f"CASE WHEN UPPER(COALESCE({ag},'')) LIKE '%FN-SFNOC%' THEN 'SFNOC' WHEN UPPER(COALESCE({ag},'')) LIKE '%FN-THD%' OR UPPER(COALESCE({ag},'')) LIKE '%JLK%' THEN 'THD Data' WHEN UPPER(COALESCE({ag},'')) LIKE '%HSBC-DATA%' THEN 'HSBC Data' ELSE NULL END"
+    tp=[]; rp=[]
+    if "ProjectName" in cols: tp.append(f"NULLIF(LTRIM(RTRIM({alias}.ProjectName)),'')")
+    if has_tower: tp.append("t.TowerName")
+    if has_tt: tp.append("tt.TowerName")
+    tp.append(tf)
+    if "TrackName" in cols: rp.append(f"NULLIF(LTRIM(RTRIM({alias}.TrackName)),'')")
+    if has_track: rp.append("tr.TrackName")
+    if has_tt: rp.append("tt.TrackName")
+    rp.append(trf)
+    tower_expr="COALESCE("+",".join(tp)+",'Unknown')"; track_expr="COALESCE("+",".join(rp)+",'Unknown')"
+    return cols,joins,tower_expr,track_expr,f"(:tower IS NULL OR {tower_expr}=:tower) AND (:track IS NULL OR {track_expr}=:track)"
 
 
 def _alert_context(db, alias: str = "a"):
@@ -166,7 +161,7 @@ def get_alert_frequency(start_date=None,end_date=None,tower=None,track=None):
     db=SessionLocal()
     try:
         cols,joins,_tower,_track,scope=_alert_context(db,"a")
-        device_expr = "ISNULL(a.Part,'Unknown')" if "Part" in cols else ("ISNULL(a.Device,'Unknown')" if "Device" in cols else "'Unknown'")
+        device_expr="ISNULL(a.Part,'Unknown')" if "Part" in cols else ("ISNULL(a.Device,'Unknown')" if "Device" in cols else "'Unknown'")
         q=f"SELECT {device_expr} Device,ISNULL(a.AlertType,'Unknown') AlertType,ISNULL(a.Severity,'Unknown') Severity,COUNT(*) AlertCount FROM qbr.Alert a {joins} WHERE {_date_filter('a','AlertTime')} AND {scope} GROUP BY {device_expr},ISNULL(a.AlertType,'Unknown'),ISNULL(a.Severity,'Unknown') ORDER BY AlertCount DESC,Device"
         rows=db.execute(text(q),_params(start_date,end_date,tower,track)).fetchall()
         return pd.DataFrame([{"Device":r.Device,"AlertType":r.AlertType,"Severity":r.Severity,"Count":_safe_int(r.AlertCount)} for r in rows])
