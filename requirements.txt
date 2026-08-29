@@ -9,3 +9,4 @@ python-multipart
 passlib[bcrypt]
 python-dotenv
 pyodbc
+streamlit-cookies-manager-v2
