@@ -1,0 +1,73 @@
+QBR Executive Dashboard - Limitations & Known Issues
+=====================================================
+
+DATA LIMITATIONS
+----------------
+
+1. File Formats:
+   - Only .xlsx, .xls, .csv, and .txt files are supported
+   - Files must be placed in app/dataset/ folder
+
+2. Column Detection:
+   - System uses flexible column name matching
+   - Unrecognized columns are ignored
+   - Required column: Ticket Number (any recognized name)
+
+3. Data Mapping:
+   - Tickets are mapped to Towers/Tracks based on Assignment Group
+   - Unmapped assignment groups will show as "Unmapped"
+   - Parent-Child relationships require valid Parent Ticket Number
+
+4. Date Handling:
+   - Dates must be in recognizable format (YYYY-MM-DD)
+   - Invalid dates are ignored
+   - Default date range is auto-detected from data
+
+5. Duplicate Handling:
+   - Duplicate Ticket Numbers are skipped
+   - Existing data is not updated (only new tickets added)
+
+DASHBOARD LIMITATIONS
+---------------------
+
+1. Browser Compatibility:
+   - Recommended: Chrome, Edge, Firefox (latest versions)
+   - May not work properly in Internet Explorer
+
+2. Real-time Updates:
+   - Dashboard does not auto-refresh
+   - Click "Pull / Refresh Data" to reload
+
+3. Export Limitations:
+   - CSV export includes Tower/Track volume data only
+   - Excel export includes multiple sheets with filtered data
+   - Large datasets may take time to export
+
+4. Filter Behavior:
+   - Date range filter applies to all sections
+   - Tower/Track selection filters data globally
+   - "All" option shows data across all towers/tracks
+
+5. Performance:
+   - Large datasets (>10,000 tickets) may affect performance
+   - Recommended: Load data in monthly/quarterly batches
+
+TECHNICAL LIMITATIONS
+---------------------
+
+1. Database:
+   - SQL Server is required
+   - SQLite is not supported for production
+
+2. Authentication:
+   - Default users must set password on first login
+   - Session timeout depends on Streamlit configuration
+
+3. Charts:
+   - Plotly charts require JavaScript enabled
+   - 3D effects are CSS-based (no WebGL)
+
+VERSION INFO
+------------
+Version: 2.0 (DB-Driven)
+Last Updated: 2026-08-29

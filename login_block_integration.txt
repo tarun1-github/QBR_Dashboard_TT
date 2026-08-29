@@ -1,0 +1,38 @@
+QBR login block integration
+
+1. Copy login_block_fixed.py to:
+   E:\Projects\QBR_Ticket_Alert_Dashboard\app\login_block.py
+
+2. In dashboard.py remove the old V7/V8 login block and use:
+
+from app.login_block import render_login, render_flash, initialise_auth_state
+
+initialise_auth_state()
+
+if not st.session_state.user:
+    render_flash()
+    render_login()
+    st.stop()
+
+render_flash()
+
+3. Do NOT keep a second render_login(), valid_password(), or old forgot-password block
+   in dashboard.py.
+
+4. app/auth.py must contain:
+   get_user
+   verify_password
+   set_password
+   change_password
+   reset_password_self_service
+
+5. Forgot Password is self-service. It does NOT create a supervisor/superuser request.
+
+6. The login fields are compact and centered. Username remains blank until typed.
+
+7. First login:
+   enter username -> LOGIN -> Set Password -> set password -> automatic login.
+
+8. Test:
+   python -m py_compile app\login_block.py
+   python -m streamlit run app\dashboard.py

@@ -1,0 +1,11 @@
+fastapi
+uvicorn[standard]
+streamlit
+pandas
+openpyxl
+sqlalchemy
+plotly
+python-multipart
+passlib[bcrypt]
+python-dotenv
+pyodbc
