@@ -30,7 +30,7 @@ def get_tower_track_hierarchy():
         hierarchy = {}
         for row in result:
             tower_name = row[1]
-            track_name = row[2]
+            track_name = row[3]
             if tower_name not in hierarchy:
                 hierarchy[tower_name] = []
             hierarchy[tower_name].append(track_name)
@@ -380,7 +380,7 @@ def get_parent_child_relation(start_date=None, end_date=None, tower_id=None, tra
             FROM qbr.Ticket p
             LEFT JOIN qbr.Tower t ON t.TowerID = p.TowerID
             LEFT JOIN qbr.Track tr ON tr.TrackID = p.TrackID
-            LEFT JOIN qbr.Ticket c ON c.ParentTicketNumber = p.TicketNumber AND c.TicketType = 'Child'
+            INNER JOIN qbr.Ticket c ON c.ParentTicketNumber = p.TicketNumber AND c.TicketType = 'Child'
             WHERE p.TicketType = 'Parent'
               AND (:start_date IS NULL OR p.OpenedAt >= :start_date)
               AND (:end_date IS NULL OR p.OpenedAt <= :end_date)
