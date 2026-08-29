@@ -307,7 +307,8 @@ def load_file(db, filepath):
             print(f"  Unsupported file type: {ext}")
             return 0, 0
         
-        return load_dataframe(db, df, filepath.name)
+        loaded, errors = load_dataframe(db, df, filepath.name)
+        return loaded, errors
         
     except Exception as e:
         print(f"  Error reading file: {e}")
@@ -419,7 +420,13 @@ def main():
             if not filepath.exists():
                 filepath = Path(args.dataset_folder) / args.file
             if filepath.exists():
-                load_file(db, filepath)
+                loaded, errors = load_file(db, filepath)
+                if errors == 0 and loaded > 0 and filepath.exists():
+                    try:
+                        filepath.unlink()
+                        print(f"  Deleted successfully loaded source: {filepath}")
+                    except OSError as exc:
+                        print(f"  WARNING: data loaded but could not delete {filepath}: {exc}")
             else:
                 print(f"File not found: {args.file}")
         else:
@@ -434,7 +441,13 @@ def main():
                 if files:
                     print(f"Found {len(files)} files in {args.dataset_folder}")
                     for filepath in sorted(files):
-                        load_file(db, filepath)
+                        loaded, errors = load_file(db, filepath)
+                        if errors == 0 and loaded > 0 and filepath.exists():
+                            try:
+                                filepath.unlink()
+                                print(f"  Deleted successfully loaded source: {filepath}")
+                            except OSError as exc:
+                                print(f"  WARNING: data loaded but could not delete {filepath}: {exc}")
                 else:
                     print(f"No supported files found in {args.dataset_folder}")
                     print("Supported formats: .xlsx, .xls, .csv, .txt")

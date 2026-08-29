@@ -259,6 +259,11 @@ kpis=[("🎫 TOTAL TICKETS",k.get("total",0),"Selected timeframe","linear-gradie
 for c,item in zip(st.columns(5),kpis[:5]):render_kpi(c,item)
 for c,item in zip(st.columns(4),kpis[5:]):render_kpi(c,item)
 
+if stats and stats.get("max_date") is not None and stats.get("min_date") is not None:
+    max_date=pd.to_datetime(stats["max_date"]).strftime("%d %b %Y")
+    min_date=pd.to_datetime(stats["min_date"]).strftime("%d %b %Y")
+    st.markdown(f'<div class="qbr-volume-note">📌 Maximum ticket volume: <b>{_safe_int(stats.get("max_count")):,}</b> tickets on <b>{max_date}</b> &nbsp; • &nbsp; Minimum ticket volume: <b>{_safe_int(stats.get("min_count")):,}</b> tickets on <b>{min_date}</b>.</div>',unsafe_allow_html=True)
+
 if view=="Day":trend=get_daily_trend(start,end,scope_tower,scope_track);x="Date"
 elif view=="Week":trend=get_weekly_trend(start,end,scope_tower,scope_track);x="Week"
 elif view=="Month":trend=get_monthly_trend(start,end,scope_tower,scope_track);x="Month"
@@ -282,7 +287,7 @@ with a:
     else:msg("inf","No parent-child relationship rows.","The selected scope returned no Child tickets with ParentTicketNumber.")
 with b:
     if not alerts.empty:
-        d=alerts.groupby("Part",as_index=False)["Count"].sum().sort_values("Count",ascending=False).head(10);st.plotly_chart(horizontal_bar(d["Part"].astype(str).tolist(),d["Count"].tolist(),"⚡ Highest Alert / Part Frequency","#d3342f",360," alerts"),use_container_width=True,config={"displayModeBar":False})
+        d=alerts.groupby("Device",as_index=False)["Count"].sum().sort_values("Count",ascending=False).head(10);st.plotly_chart(horizontal_bar(d["Device"].astype(str).tolist(),d["Count"].tolist(),"⚡ Highest Alert / Device Frequency","#d3342f",360," alerts"),use_container_width=True,config={"displayModeBar":False})
     else:msg("inf","No alert frequency rows.","No alert rows match the selected filters.")
 
 st.markdown('<div class="qbr-section">⚡ Tower / Track Alert Summary</div>',unsafe_allow_html=True)
