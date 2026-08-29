@@ -71,22 +71,28 @@ def _alert_context(db, alias: str = "a"):
 
 
 def get_tower_track_hierarchy():
-    db=SessionLocal()
+    db = SessionLocal()
     try:
-        if _table_exists(db,"TowerTrack"):
-            rows=db.execute(text("SELECT TowerTrackID,TowerName,TrackName FROM qbr.TowerTrack WHERE ISNULL(IsActive,1)=1 ORDER BY CASE WHEN TowerName='Foundation' THEN 0 ELSE 1 END,TowerName,TrackName")).fetchall()
-            out={}
-            for r in rows: out.setdefault(r.TowerName,[]).append({"TowerTrackID":r.TowerTrackID,"TrackName":r.TrackName})
-        else:
-            rows=db.execute(text("SELECT t.TowerID,tr.TrackID,t.TowerName,tr.TrackName FROM qbr.Tower t JOIN qbr.Track tr ON tr.TowerID=t.TowerID WHERE ISNULL(t.IsActive,1)=1 AND ISNULL(tr.IsActive,1)=1 ORDER BY CASE WHEN t.TowerName='Foundation' THEN 0 ELSE 1 END,t.TowerName,tr.TrackName")).fetchall()
-            out={}
-            for r in rows: out.setdefault(r.TowerName,[]).append({"TowerTrackID":r.TrackID,"TrackName":r.TrackName})
-        if "Foundation" in out:
-            wanted=["SFNOC","THD Data","HSBC Data"]
-            found={d["TrackName"]:d for d in out["Foundation"]}
-            out["Foundation"]=[found[n] for n in wanted if n in found]
-        return out
-    finally: db.close()
+        out = {}
+        # Prefer TowerTrack, but also merge qbr.Tower/qbr.Track because some
+        # environments have a partial TowerTrack catalogue.
+        if _table_exists(db, "TowerTrack"):
+            rows = db.execute(text("SELECT TowerTrackID,TowerName,TrackName FROM qbr.TowerTrack WHERE ISNULL(IsActive,1)=1 ORDER BY TowerName,TrackName")).fetchall()
+            for r in rows:
+                out.setdefault(str(r.TowerName), {})[str(r.TrackName)] = {"TowerTrackID": r.TowerTrackID, "TrackName": str(r.TrackName)}
+        if _table_exists(db, "Tower") and _table_exists(db, "Track"):
+            rows = db.execute(text("SELECT t.TowerID,tr.TrackID,t.TowerName,tr.TrackName FROM qbr.Tower t JOIN qbr.Track tr ON tr.TowerID=t.TowerID WHERE ISNULL(t.IsActive,1)=1 AND ISNULL(tr.IsActive,1)=1 ORDER BY t.TowerName,tr.TrackName")).fetchall()
+            for r in rows:
+                tower = str(r.TowerName); track = str(r.TrackName)
+                out.setdefault(tower, {}).setdefault(track, {"TowerTrackID": r.TrackID, "TrackName": track})
+        result = {tower: list(tracks.values()) for tower, tracks in out.items()}
+        if "Foundation" in result:
+            wanted = ["SFNOC", "THD Data", "HSBC Data"]
+            found = {str(x["TrackName"]): x for x in result["Foundation"]}
+            result["Foundation"] = [found[name] for name in wanted if name in found]
+        return result
+    finally:
+        db.close()
 
 
 def get_executive_kpis(start_date=None,end_date=None,tower=None,track=None):

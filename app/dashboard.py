@@ -129,19 +129,76 @@ def _cuboid(fig,x,y,z,width,depth,height,label,color):
     fig.add_trace(go.Mesh3d(x=X,y=Y,z=Z,i=I,j=J,k=K,color=color,opacity=.92,flatshading=True,hovertemplate=f"{label}<br><b>{height}</b> tickets<extra></extra>",showlegend=False))
     fig.add_trace(go.Scatter3d(x=[x],y=[y],z=[height+.35],mode="text",text=[str(height)],textfont=dict(size=10,color="#12344d"),hoverinfo="skip",showlegend=False))
 
-def three_d_volume_figure(df,x_col,title="📈 Executive Ticket Volume",height=430):
-    fig=go.Figure();d=df.copy().reset_index(drop=True);d["Total"]=pd.to_numeric(d["Total"],errors="coerce").fillna(0).astype(int);n=max(len(d),1);zmax=max(int(d["Total"].max()) if len(d) else 1,1)
-    for i,row in d.iterrows():_cuboid(fig,i,0,.35,0.62,0.75,int(row["Total"]),"#168ba0")
-    if "Parents" in d:
-        fig.add_trace(go.Scatter3d(x=list(range(len(d))),y=[-0.55]*len(d),z=pd.to_numeric(d["Parents"],errors="coerce").fillna(0),mode="lines+markers+text",name="Parent",text=pd.to_numeric(d["Parents"],errors="coerce").fillna(0).astype(int).astype(str),textposition="top center",line=dict(color="#79a84a",width=6),marker=dict(size=5)))
-    if "Children" in d:
-        fig.add_trace(go.Scatter3d(x=list(range(len(d))),y=[0.95]*len(d),z=pd.to_numeric(d["Children"],errors="coerce").fillna(0),mode="lines+markers+text",name="Child",text=pd.to_numeric(d["Children"],errors="coerce").fillna(0).astype(int).astype(str),textposition="top center",line=dict(color="#ef7d2b",width=6),marker=dict(size=5)))
-    labels=d[x_col].astype(str).tolist();fig.update_layout(title=dict(text=title,font=dict(size=16,color="#12344d"),x=.01),height=height,margin=dict(l=0,r=0,t=50,b=0),paper_bgcolor="rgba(0,0,0,0)",showlegend=True,legend=dict(orientation="h",x=0,y=1.02),scene=dict(xaxis=dict(title="Period",tickmode="array",tickvals=list(range(len(labels))),ticktext=labels,showgrid=False),yaxis=dict(title="Series",tickmode="array",tickvals=[-0.55,0,.95],ticktext=["Parent","Total","Child"],showgrid=False,range=[-1.0,1.35]),zaxis=dict(title="Tickets",rangemode="tozero",range=[0,zmax*1.18],showgrid=True,gridcolor="#dce9ed"),camera=dict(eye=dict(x=1.55,y=1.55,z=1.15)),aspectmode="manual",aspectratio=dict(x=2.2,y=.8,z=1.15)));return fig
+def executive_volume_figure(df, x_col, title="📈 Executive Ticket Volume", height=430):
+    """Clean executive trend: total tickets as bars, parent/child as lines."""
+    d = df.copy().reset_index(drop=True)
+    if d.empty:
+        return go.Figure()
+    d["Total"] = pd.to_numeric(d["Total"], errors="coerce").fillna(0).astype(int)
+    parents = pd.to_numeric(d.get("Parents", 0), errors="coerce").fillna(0).astype(int) if "Parents" in d else pd.Series([0] * len(d))
+    children = pd.to_numeric(d.get("Children", 0), errors="coerce").fillna(0).astype(int) if "Children" in d else pd.Series([0] * len(d))
+    labels = d[x_col].astype(str).tolist()
+    fig = go.Figure()
+    fig.add_trace(go.Bar(
+        x=labels, y=d["Total"], name="Total",
+        marker=dict(color="#198da2", line=dict(color="#0f6f82", width=1)),
+        text=d["Total"], textposition="outside",
+        hovertemplate="<b>%{x}</b><br>Total tickets: %{y}<extra></extra>"
+    ))
+    fig.add_trace(go.Scatter(
+        x=labels, y=parents, name="Parent", mode="lines+markers+text",
+        text=parents.astype(str), textposition="top center",
+        line=dict(color="#6b9e3b", width=3), marker=dict(size=7),
+        hovertemplate="<b>%{x}</b><br>Parent: %{y}<extra></extra>"
+    ))
+    fig.add_trace(go.Scatter(
+        x=labels, y=children, name="Child", mode="lines+markers+text",
+        text=children.astype(str), textposition="top center",
+        line=dict(color="#ef7d2b", width=3), marker=dict(size=7),
+        hovertemplate="<b>%{x}</b><br>Child: %{y}<extra></extra>"
+    ))
+    fig.update_layout(
+        title=dict(text=title, font=dict(size=16, color="#12344d"), x=0.01),
+        height=height, margin=dict(l=40, r=25, t=50, b=45),
+        paper_bgcolor="rgba(0,0,0,0)", plot_bgcolor="#ffffff",
+        font=dict(family="Segoe UI", size=11, color="#12344d"),
+        hoverlabel=dict(bgcolor="#12344d", font_color="#ffffff"),
+        legend=dict(orientation="h", x=0, y=1.08),
+        bargap=0.28
+    )
+    fig.update_xaxes(title="Period", showgrid=False, tickangle=-25)
+    fig.update_yaxes(title="Tickets", rangemode="tozero", gridcolor="#e3edf0")
+    return fig
 
-def three_d_category_figure(df,title="🏢 Ticket Volume by Tower → Track",height=430):
-    d=df.head(12).copy().reset_index(drop=True);d["Total"]=pd.to_numeric(d["Total"],errors="coerce").fillna(0).astype(int);labels=(d["Tower"].astype(str)+" → "+d["Track"].astype(str)).tolist();zmax=max(int(d["Total"].max()) if len(d) else 1,1);fig=go.Figure()
-    for i,row in d.iterrows():_cuboid(fig,i,0,.35,.62,.75,int(row["Total"]),"#168ba0")
-    fig.update_layout(title=dict(text=title,font=dict(size=16,color="#12344d"),x=.01),height=height,margin=dict(l=0,r=0,t=50,b=0),paper_bgcolor="rgba(0,0,0,0)",scene=dict(xaxis=dict(title="Tower → Track",tickmode="array",tickvals=list(range(len(labels))),ticktext=labels,showgrid=False,tickangle=-30),yaxis=dict(showticklabels=False,showgrid=False),zaxis=dict(title="Tickets",rangemode="tozero",range=[0,zmax*1.2],gridcolor="#dce9ed"),camera=dict(eye=dict(x=1.6,y=1.6,z=1.05)),aspectmode="manual",aspectratio=dict(x=2.6,y=.75,z=1.1)));return fig
+def ticket_volume_by_tower_track_figure(df, title="📊 Ticket Volume by Tower → Track", height=430):
+    """Clean executive horizontal ranking of ticket volume."""
+    d = df.copy()
+    if d.empty:
+        return go.Figure()
+    d["Total"] = pd.to_numeric(d["Total"], errors="coerce").fillna(0).astype(int)
+    d["Label"] = d["Tower"].astype(str) + " → " + d["Track"].astype(str)
+    d = d.sort_values("Total", ascending=True).tail(12)
+    palette = {"Foundation":"#5b9f3b", "Collaboration":"#198da2", "Security":"#d94a4a", "Non-CMS":"#9b7b24"}
+    colors = [palette.get(str(t), "#547a90") for t in d["Tower"]]
+    fig = go.Figure(go.Bar(
+        x=d["Total"], y=d["Label"], orientation="h",
+        marker=dict(color=colors, line=dict(color="#ffffff", width=1)),
+        text=d["Total"], textposition="outside", cliponaxis=False,
+        customdata=d[["Tower","Track"]],
+        hovertemplate="<b>%{y}</b><br>Tower: %{customdata[0]}<br>Track: %{customdata[1]}<br>Tickets: %{x}<extra></extra>"
+    ))
+    fig.update_layout(
+        title=dict(text=title, font=dict(size=16, color="#12344d"), x=0.01),
+        height=height, margin=dict(l=10, r=55, t=50, b=35),
+        paper_bgcolor="rgba(0,0,0,0)", plot_bgcolor="#ffffff",
+        font=dict(family="Segoe UI", size=11, color="#12344d"), showlegend=False
+    )
+    fig.update_xaxes(title="Tickets", rangemode="tozero", gridcolor="#e3edf0")
+    fig.update_yaxes(title="", showgrid=False, automargin=True)
+    return fig
+
+
+
 
 def horizontal_bar(labels,values,title,color,height=360,suffix=""):
     pairs=sorted([(str(a),_safe_int(b)) for a,b in zip(labels,values)],key=lambda x:x[1])[-12:];labs=[a for a,b in pairs];vals=[b for a,b in pairs];fig=_fig(title,height);fig.add_trace(go.Bar(y=labs,x=vals,orientation="h",marker=dict(color=color,line=dict(color="#fff",width=1)),text=vals,texttemplate="%{text}"+suffix,textposition="outside",cliponaxis=False,hovertemplate="%{y}<br><b>%{x}</b>"+suffix+"<extra></extra>"));fig.update_xaxes(title="Count",rangemode="tozero",gridcolor="#e4eef1");fig.update_yaxes(showgrid=False,automargin=True);return fig
@@ -211,10 +268,10 @@ st.markdown('<div class="qbr-section">📈 Executive Volume & Trend</div>',unsaf
 st.markdown('<div class="qbr-volume-note">3D executive view • Total tickets are shown as columns; parent and child workload are shown as trend lines. Hover over any column for the exact count.</div>',unsafe_allow_html=True)
 a,b=st.columns([1.45,1])
 with a:
-    if not trend.empty:st.plotly_chart(three_d_volume_figure(trend,x,"📈 Executive Ticket Volume — 3D Trend",450),use_container_width=True,config={"displayModeBar":False})
+    if not trend.empty:st.plotly_chart(executive_volume_figure(trend,x,"📈 Executive Ticket Volume",430),use_container_width=True,config={"displayModeBar":False})
     else:msg("inf","No ticket trend data.","Try a wider date range.")
 with b:
-    if not vol.empty:st.plotly_chart(three_d_category_figure(vol,"🏢 Ticket Volume by Tower → Track — 3D"),use_container_width=True,config={"displayModeBar":False})
+    if not vol.empty:st.plotly_chart(ticket_volume_by_tower_track_figure(volume_df,"📊 Ticket Volume by Tower → Track",430),use_container_width=True,config={"displayModeBar":False})
     else:msg("inf","No Tower / Track ticket volume.","No ticket rows match the selected filters.")
 
 st.markdown('<div class="qbr-section">👑 Parent-Child & Alert Analysis</div>',unsafe_allow_html=True);a,b=st.columns(2)
