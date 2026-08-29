@@ -13,7 +13,8 @@ SAFE LOAD FLOW
 6. Optionally replace the existing qbr.Ticket data (--replace-tickets).
 7. Load only the deduplicated/merged records in ONE database transaction.
 8. If any row fails, ROLLBACK the whole batch; source files remain for retry.
-9. Only after a successful zero-error commit, move source/audit files to:
+9. Validate that the current database batch contains no duplicate TicketNumber.
+10. Only after a successful zero-error commit, move source/audit files to:
       app/dataset/processed/<timestamp>/
 
 Duplicate records are NEVER inserted as separate Ticket rows.
@@ -38,7 +39,6 @@ GENERATED_PREFIX = "_"
 MERGED_OUTPUT = "_merged_input.xlsx"
 DUPLICATE_OUTPUT = "_duplicate_records.xlsx"
 PROCESSED_FOLDER = "processed"
-
 
 # Explicit business fallback confirmed for the current ServiceNow ticket feed.
 # It is used only when Ticket.TowerID/TrackID and source TrackName are missing.
@@ -228,7 +228,7 @@ def compare_and_merge_files(files, dataset_path: Path):
     if duplicate_path.exists():
         duplicate_path.unlink()
 
-    # Keep the duplicate audit easy to inspect: detailed records + summary sheet.
+    # Duplicate audit: detailed occurrences plus one row per duplicate TicketNumber.
     with pd.ExcelWriter(duplicate_path, engine="openpyxl") as writer:
         duplicates.to_excel(writer, sheet_name="Duplicates", index=False)
         if duplicate_keys:
@@ -244,7 +244,7 @@ def compare_and_merge_files(files, dataset_path: Path):
             summary = pd.DataFrame(columns=["TicketKey", "Occurrences", "SourceFiles"])
         summary.to_excel(writer, sheet_name="Summary", index=False)
 
-    # Exactly one load-ready row per ticket key.
+    # Exactly one load-ready row per TicketNumber.
     merged_records = []
     grouped = combined[valid_keys].groupby("TicketKey", sort=False)
     for _, group in grouped:
@@ -255,7 +255,7 @@ def compare_and_merge_files(files, dataset_path: Path):
         else:
             merged_records.append(consolidate_duplicate_rows(group))
 
-    # Rows without ticket numbers are not safe to load as ticket records.
+    # Rows without ticket numbers are never loaded as ticket records.
     missing_key_rows = int((~valid_keys).sum())
     if missing_key_rows:
         print(f"  SKIPPED from load-ready merge: {missing_key_rows:,} row(s) without TicketNumber")
@@ -263,6 +263,19 @@ def compare_and_merge_files(files, dataset_path: Path):
     merged = pd.DataFrame(merged_records)
     if "SourceFile" in merged.columns:
         merged["SourceFile"] = merged["SourceFile"].fillna("").astype(str)
+
+    # Hard validation: the merged dataset itself must contain one unique TicketNumber per row.
+    merged_ticket_col = find_ticket_column(merged.columns)
+    if not merged_ticket_col:
+        raise RuntimeError("Merged dataset lost the TicketNumber column during consolidation.")
+
+    merged_keys = merged[merged_ticket_col].map(normalize_ticket_key)
+    merged_valid = merged_keys.ne("")
+    merged_duplicate_count = int(merged_keys[merged_valid].duplicated().sum())
+    if merged_duplicate_count:
+        raise RuntimeError(
+            f"Duplicate validation failed after merge: {merged_duplicate_count:,} duplicate TicketNumber row(s) remain."
+        )
 
     merged_path = dataset_path / MERGED_OUTPUT
     if merged_path.exists():
@@ -362,22 +375,6 @@ def parse_date(row, columns):
     return None
 
 
-def clear_all_data(db=None):
-    """Explicitly replace qbr.Ticket data. Other dashboard data is preserved."""
-    own_session = db is None
-    session = db or SessionLocal()
-    try:
-        session.execute(text("DELETE FROM qbr.Ticket"))
-        session.commit()
-        print("Existing qbr.Ticket data cleared successfully.")
-    except Exception:
-        session.rollback()
-        raise
-    finally:
-        if own_session:
-            session.close()
-
-
 def load_dataframe(db, df, filename):
     print(f"\nLoading merged data: {filename}")
     print(f"  Load-ready records: {len(df):,}")
@@ -421,7 +418,7 @@ def load_dataframe(db, df, filename):
                     skipped += 1
                     continue
 
-                # Second safety gate: never insert the same TicketNumber twice in this batch.
+                # Hard in-memory safety gate.
                 if ticket_key in seen_in_batch:
                     skipped += 1
                     continue
@@ -457,15 +454,12 @@ def load_dataframe(db, df, filename):
                     if ids:
                         track_id, tower_id = ids
 
+                assignment = first_value(row, [
+                    "Assignment group", "AssignmentGroup", "Assignment_Group"
+                ])
+
                 if track_id is None:
-                    assignment = first_value(row, [
-                        "Assignment group", "AssignmentGroup", "Assignment_Group"
-                    ])
                     track_id, tower_id = map_assignment_to_track(assignment, track_map)
-                else:
-                    assignment = first_value(row, [
-                        "Assignment group", "AssignmentGroup", "Assignment_Group"
-                    ])
 
                 if track_id is None and company:
                     track_id, tower_id = map_company_to_track(company, track_map)
@@ -528,6 +522,23 @@ def load_dataframe(db, df, filename):
             for msg in errors[:10]:
                 print(f"    {msg}")
             return 0, len(errors), skipped
+
+        # Final database-level validation happens before COMMIT.
+        batch_duplicate = db.execute(text("""
+            SELECT TOP (1) TicketNumber
+            FROM qbr.Ticket
+            WHERE LoadBatchID = :batch
+            GROUP BY TicketNumber
+            HAVING COUNT(*) > 1
+        """), {"batch": batch_id}).first()
+
+        if batch_duplicate:
+            db.rollback()
+            print(
+                "  LOAD FAILED - duplicate TicketNumber detected in the database batch: "
+                f"{batch_duplicate[0]}"
+            )
+            return 0, 1, skipped
 
         db.commit()
         print(f"  Loaded: {loaded:,}, Skipped/existing: {skipped:,}, Errors: 0")
@@ -614,7 +625,7 @@ def main():
     parser.add_argument("--show-summary", action="store_true", help="Show data summary")
     parser.add_argument(
         "--replace-tickets", "--clear", dest="replace_tickets", action="store_true",
-        help="Replace all existing qbr.Ticket rows after pre-load validation; use only for a full clean reload",
+        help="Replace all existing qbr.Ticket rows after pre-load validation; the delete and insert are one transaction",
     )
     parser.add_argument("--dataset-folder", default="app/dataset", help="Dataset folder path")
     args = parser.parse_args()
@@ -653,18 +664,18 @@ def main():
         return
 
     db = SessionLocal()
+    archive_dir = None
     try:
-        # Validation/merge is complete before any destructive DB operation.
+        # The delete for --replace-tickets intentionally stays in the SAME
+        # transaction as the insert. If loading fails, rollback restores the old data.
         if args.replace_tickets:
             print("\nFULL CLEAN TICKET RELOAD REQUESTED")
-            print("Existing qbr.Ticket rows will be deleted only now, after duplicate validation.")
+            print("Existing qbr.Ticket rows will be deleted in the same transaction as the new load.")
             try:
                 db.execute(text("DELETE FROM qbr.Ticket"))
-                db.commit()
-                print("Existing qbr.Ticket data cleared successfully.")
             except Exception as exc:
                 db.rollback()
-                print(f"ERROR clearing qbr.Ticket: {exc}")
+                print(f"ERROR preparing qbr.Ticket replacement: {exc}")
                 print("Source files were retained for retry.")
                 return
 
@@ -687,6 +698,7 @@ def main():
                 for filename in moved_files:
                     print(f"  - {filename}")
                 print(f"\nMoved location: {archive_dir}")
+            print("Source files are no longer present in app/dataset.")
             print("=" * 70)
         else:
             print("\nPOST-LOAD FILE CLEANUP SKIPPED")
