@@ -29,28 +29,36 @@ def _date_filter(alias: str, date_col: str) -> str:
 
 
 def _ticket_context(db, alias: str = "tk"):
-    """Resolve Ticket hierarchy from canonical foreign keys when available."""
+    """Resolve hierarchy from the ticket's stored ProjectName/TrackName first.
+
+    The CPDB ticket rows already carry the business hierarchy. Prefer those
+    values over potentially stale FK mappings so THD Data/SFNOC/HSBC Data
+    cannot become an artificial 'Unknown' bucket in the dashboard.
+    """
     cols = _columns(db, "Ticket")
     joins = ""
     tower_expr = f"ISNULL({alias}.ProjectName,'Unknown')" if "ProjectName" in cols else "'Unknown'"
     track_expr = f"ISNULL({alias}.TrackName,'Unknown')" if "TrackName" in cols else "'Unknown'"
     scope = []
 
-    # CPDB v2 schema: Ticket.TowerID -> qbr.Tower, Ticket.TrackID -> qbr.Track.
-    if {"TowerID", "TrackID"}.issubset(cols) and _table_exists(db, "Tower") and _table_exists(db, "Track"):
+    if "ProjectName" in cols:
+        scope.append(f"(:tower IS NULL OR {alias}.ProjectName=:tower)")
+    elif "TowerName" in cols:
+        scope.append(f"(:tower IS NULL OR {alias}.TowerName=:tower)")
+    if "TrackName" in cols:
+        scope.append(f"(:track IS NULL OR {alias}.TrackName=:track)")
+
+    # Fallback only when the business-name columns do not exist.
+    if "ProjectName" not in cols and "TowerName" not in cols and {"TowerID", "TrackID"}.issubset(cols) and _table_exists(db, "Tower") and _table_exists(db, "Track"):
         joins = f" LEFT JOIN qbr.Tower t ON t.TowerID={alias}.TowerID LEFT JOIN qbr.Track tr ON tr.TrackID={alias}.TrackID"
         tower_expr = "ISNULL(t.TowerName,'Unknown')"
         track_expr = "ISNULL(tr.TrackName,'Unknown')"
-        scope.extend(["(:tower IS NULL OR t.TowerName=:tower)", "(:track IS NULL OR tr.TrackName=:track)"])
-    elif {"TowerTrackID"}.issubset(cols) and _table_exists(db, "TowerTrack"):
+        scope = ["(:tower IS NULL OR t.TowerName=:tower)", "(:track IS NULL OR tr.TrackName=:track)"]
+    elif "ProjectName" not in cols and "TowerName" not in cols and "TowerTrackID" in cols and _table_exists(db, "TowerTrack"):
         joins = f" LEFT JOIN qbr.TowerTrack tt ON tt.TowerTrackID={alias}.TowerTrackID"
         tower_expr = "ISNULL(tt.TowerName,'Unknown')"
         track_expr = "ISNULL(tt.TrackName,'Unknown')"
-        scope.extend(["(:tower IS NULL OR tt.TowerName=:tower)", "(:track IS NULL OR tt.TrackName=:track)"])
-    else:
-        if "ProjectName" in cols: scope.append(f"(:tower IS NULL OR {alias}.ProjectName=:tower)")
-        if "TowerName" in cols: scope.append(f"(:tower IS NULL OR {alias}.TowerName=:tower)")
-        if "TrackName" in cols: scope.append(f"(:track IS NULL OR {alias}.TrackName=:track)")
+        scope = ["(:tower IS NULL OR tt.TowerName=:tower)", "(:track IS NULL OR tt.TrackName=:track)"]
 
     return cols, joins, tower_expr, track_expr, (" AND ".join(scope) if scope else "1=1")
 
@@ -61,29 +69,39 @@ def _alert_context(db, alias: str = "a"):
     tower_expr = f"ISNULL({alias}.ProjectName,'Unknown')" if "ProjectName" in cols else "'Unknown'"
     track_expr = f"ISNULL({alias}.TrackName,'Unknown')" if "TrackName" in cols else "'Unknown'"
     scope = []
-    if {"TowerID", "TrackID"}.issubset(cols) and _table_exists(db, "Tower") and _table_exists(db, "Track"):
+    if "ProjectName" in cols:
+        scope.append(f"(:tower IS NULL OR {alias}.ProjectName=:tower)")
+    elif "TowerName" in cols:
+        scope.append(f"(:tower IS NULL OR {alias}.TowerName=:tower)")
+    if "TrackName" in cols:
+        scope.append(f"(:track IS NULL OR {alias}.TrackName=:track)")
+
+    if "ProjectName" not in cols and "TowerName" not in cols and {"TowerID", "TrackID"}.issubset(cols) and _table_exists(db, "Tower") and _table_exists(db, "Track"):
         joins = f" LEFT JOIN qbr.Tower t ON t.TowerID={alias}.TowerID LEFT JOIN qbr.Track tr ON tr.TrackID={alias}.TrackID"
-        tower_expr = "ISNULL(t.TowerName,ISNULL(a.ProjectName,'Unknown'))"
-        track_expr = "ISNULL(tr.TrackName,ISNULL(a.TrackName,'Unknown'))"
-        scope.extend(["(:tower IS NULL OR t.TowerName=:tower)", "(:track IS NULL OR tr.TrackName=:track)"])
-    else:
-        if "ProjectName" in cols: scope.append(f"(:tower IS NULL OR {alias}.ProjectName=:tower)")
-        elif "TowerName" in cols: scope.append(f"(:tower IS NULL OR {alias}.TowerName=:tower)")
-        if "TrackName" in cols: scope.append(f"(:track IS NULL OR {alias}.TrackName=:track)")
+        tower_expr = "ISNULL(t.TowerName,'Unknown')"
+        track_expr = "ISNULL(tr.TrackName,'Unknown')"
+        scope = ["(:tower IS NULL OR t.TowerName=:tower)", "(:track IS NULL OR tr.TrackName=:track)"]
     return cols, joins, tower_expr, track_expr, (" AND ".join(scope) if scope else "1=1")
 
 
 def get_tower_track_hierarchy():
     db=SessionLocal()
     try:
+        # Business hierarchy: Foundation is explicitly ordered as requested.
         if _table_exists(db,"TowerTrack"):
-            rows=db.execute(text("SELECT TowerTrackID,TowerName,TrackName FROM qbr.TowerTrack WHERE ISNULL(IsActive,1)=1 ORDER BY TowerName,TrackName")).fetchall()
+            rows=db.execute(text("SELECT TowerTrackID,TowerName,TrackName FROM qbr.TowerTrack WHERE ISNULL(IsActive,1)=1 ORDER BY CASE WHEN TowerName='Foundation' THEN 0 ELSE 1 END,TowerName,TrackName")).fetchall()
             out={}
             for r in rows: out.setdefault(r.TowerName,[]).append({"TowerTrackID":r.TowerTrackID,"TrackName":r.TrackName})
-            return out
-        rows=db.execute(text("SELECT t.TowerID,tr.TrackID,t.TowerName,tr.TrackName FROM qbr.Tower t JOIN qbr.Track tr ON tr.TowerID=t.TowerID WHERE ISNULL(t.IsActive,1)=1 AND ISNULL(tr.IsActive,1)=1 ORDER BY t.TowerName,tr.TrackName")).fetchall()
-        out={}
-        for r in rows: out.setdefault(r.TowerName,[]).append({"TowerTrackID":r.TrackID,"TrackName":r.TrackName})
+        else:
+            rows=db.execute(text("SELECT t.TowerID,tr.TrackID,t.TowerName,tr.TrackName FROM qbr.Tower t JOIN qbr.Track tr ON tr.TowerID=t.TowerID WHERE ISNULL(t.IsActive,1)=1 AND ISNULL(tr.IsActive,1)=1 ORDER BY CASE WHEN t.TowerName='Foundation' THEN 0 ELSE 1 END,t.TowerName,tr.TrackName")).fetchall()
+            out={}
+            for r in rows: out.setdefault(r.TowerName,[]).append({"TowerTrackID":r.TrackID,"TrackName":r.TrackName})
+
+        # Keep Foundation's business menu deterministic and free of accidental tracks.
+        if "Foundation" in out:
+            wanted=["SFNOC","THD Data","HSBC Data"]
+            found={d["TrackName"]:d for d in out["Foundation"]}
+            out["Foundation"]=[found[name] for name in wanted if name in found]
         return out
     finally: db.close()
 
