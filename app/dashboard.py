@@ -603,20 +603,20 @@ if track != "All" and not volume_df.empty:
     volume_df = volume_df[volume_df['Track'] == track]
 
 # ============================================================
-# Executive KPI Cards
+# Executive KPI Cards - Enhanced 3D Style
 # ============================================================
 st.markdown(
     '<div class="qbr-section">📈 Executive KPIs</div>',
     unsafe_allow_html=True,
 )
 
-# Row 1: Main KPIs
+# Row 1: Main KPIs with enhanced gradients
 c1, c2, c3, c4, c5 = st.columns(5)
 
 with c1:
     st.markdown(
         f"""
-        <div class="qbr-kpi" style="background:linear-gradient(135deg,#19708b,#19708bcc)">
+        <div class="qbr-kpi" style="background:linear-gradient(135deg,#0e2d49,#146b86,#22a48e)">
             <div class="t">🎫 TOTAL TICKETS</div>
             <div class="v">{kpis['total']:,}</div>
             <div class="s">Selected timeframe</div>
@@ -628,7 +628,7 @@ with c1:
 with c2:
     st.markdown(
         f"""
-        <div class="qbr-kpi" style="background:linear-gradient(135deg,#5b8f3b,#5b8f3bcc)">
+        <div class="qbr-kpi" style="background:linear-gradient(135deg,#2d7d9a,#4a9ab5,#6bb8d0)">
             <div class="t">👑 PARENT TICKETS</div>
             <div class="v">{kpis['parents']:,}</div>
             <div class="s">Root workload</div>
@@ -640,7 +640,7 @@ with c2:
 with c3:
     st.markdown(
         f"""
-        <div class="qbr-kpi" style="background:linear-gradient(135deg,#ee8233,#ee8233cc)">
+        <div class="qbr-kpi" style="background:linear-gradient(135deg,#ee8233,#f5a85c,#f9c98a)">
             <div class="t">↳ CHILD TICKETS</div>
             <div class="v">{kpis['children']:,}</div>
             <div class="s">Linked workload</div>
@@ -653,7 +653,7 @@ with c4:
     total_alerts = len(alert_freq_df) if not alert_freq_df.empty else 0
     st.markdown(
         f"""
-        <div class="qbr-kpi" style="background:linear-gradient(135deg,#c91414,#c91414cc)">
+        <div class="qbr-kpi" style="background:linear-gradient(135deg,#c91414,#e84444,#f07070)">
             <div class="t">⚡ ALERTS</div>
             <div class="v">{total_alerts:,}</div>
             <div class="s">Monitoring events</div>
@@ -667,7 +667,7 @@ with c5:
     min_vol = volume_stats['min_count'] if volume_stats else 0
     st.markdown(
         f"""
-        <div class="qbr-kpi" style="background:linear-gradient(135deg,#8a6b09,#8a6b09cc)">
+        <div class="qbr-kpi" style="background:linear-gradient(135deg,#8a6b09,#b89428,#d4b34a)">
             <div class="t">📊 MAX / MIN</div>
             <div class="v">{max_vol:,} / {min_vol:,}</div>
             <div class="s">Tickets per day</div>
@@ -676,14 +676,14 @@ with c5:
         unsafe_allow_html=True,
     )
 
-# Row 2: Additional KPIs
+# Row 2: Additional KPIs with vibrant colors
 st.write("")
 c6, c7, c8, c9 = st.columns(4)
 
 with c6:
     st.markdown(
         f"""
-        <div class="qbr-kpi" style="background:linear-gradient(135deg,#2d7d9a,#2d7d9acc)">
+        <div class="qbr-kpi" style="background:linear-gradient(135deg,#3b5998,#5a7bc8,#8b9dc3)">
             <div class="t">📈 AVG TICKETS/DAY</div>
             <div class="v">{volume_stats['avg_count'] if volume_stats else 0:,.1f}</div>
             <div class="s">Daily average</div>
@@ -693,11 +693,12 @@ with c6:
     )
 
 with c7:
+    open_tickets = kpis['total'] - kpis['closed']
     st.markdown(
         f"""
-        <div class="qbr-kpi" style="background:linear-gradient(135deg,#1e88e5,#1e88e5cc)">
+        <div class="qbr-kpi" style="background:linear-gradient(135deg,#1e88e5,#5ab1f5,#81d4fa)">
             <div class="t">🔵 OPEN TICKETS</div>
-            <div class="v">{kpis['total'] - kpis['closed']:,}</div>
+            <div class="v">{open_tickets:,}</div>
             <div class="s">Awaiting resolution</div>
         </div>
         """,
@@ -707,7 +708,7 @@ with c7:
 with c8:
     st.markdown(
         f"""
-        <div class="qbr-kpi" style="background:linear-gradient(135deg,#43a047,#43a047cc)">
+        <div class="qbr-kpi" style="background:linear-gradient(135deg,#43a047,#66bb6a,#a5d6a7)">
             <div class="t">✅ CLOSED TICKETS</div>
             <div class="v">{kpis['closed']:,}</div>
             <div class="s">Successfully resolved</div>
@@ -719,7 +720,7 @@ with c8:
 with c9:
     st.markdown(
         f"""
-        <div class="qbr-kpi" style="background:linear-gradient(135deg,#d32f2f,#d32f2fcc)">
+        <div class="qbr-kpi" style="background:linear-gradient(135deg,#d32f2f,#ef5350,#ef9a9a)">
             <div class="t">🔴 CRITICAL</div>
             <div class="v">{kpis['critical']:,}</div>
             <div class="s">Critical priority</div>
@@ -729,15 +730,15 @@ with c9:
     )
 
 # ============================================================
-# Volume Statistics Insights
+# Volume Statistics Insights - Enhanced
 # ============================================================
 if volume_stats:
     st.markdown(
         f"""
-        <div style="margin:15px 0; padding:12px 16px; border-radius:14px;
-                    background:linear-gradient(135deg,#edf9f4,#e5f4fb);
-                    border:1px solid #b9dfe0; color:#16435a;
-                    box-shadow:3px 4px 0 rgba(15,39,66,.08); font-size:13px; font-weight:800;">
+        <div style="margin:15px 0; padding:14px 18px; border-radius:16px;
+                    background:linear-gradient(135deg,#e8f5e9,#f1f8e9,#fffde7);
+                    border:1px solid #c8e6c9; color:#1b5e20;
+                    box-shadow:0 4px 12px rgba(0,0,0,0.08); font-size:13px; font-weight:700;">
             📊 <b>Volume Insights:</b> Highest volume on <b>{volume_stats['max_day']}</b> ({volume_stats['max_date']}) with <b>{volume_stats['max_count']}</b> tickets &nbsp;|&nbsp;
             Lowest on <b>{volume_stats['min_day']}</b> ({volume_stats['min_date']}) with <b>{volume_stats['min_count']}</b> tickets &nbsp;|&nbsp;
             Average: <b>{volume_stats['avg_count']:.1f}</b> tickets/day
@@ -747,7 +748,7 @@ if volume_stats:
     )
 
 # ============================================================
-# Trend Charts
+# Trend Charts - Enhanced Styling
 # ============================================================
 st.markdown(
     '<div class="qbr-section">📈 Trend Analysis</div>',
@@ -771,30 +772,37 @@ else:  # Quarter
 col1, col2 = st.columns(2)
 
 with col1:
-    st.markdown("### Ticket Volume Trend")
+    st.markdown("### 📊 Ticket Volume Trend")
     if not trend_df.empty:
+        # Create enhanced bar chart with better colors
         fig = px.bar(
             trend_df,
             x=x_col,
             y=["Parents", "Children"] if "Parents" in trend_df.columns else "Total",
             barmode="group",
             template="plotly_white",
-            color_discrete_map={"Parents": "#5b8f3b", "Children": "#ee8233", "Total": "#19708b"},
+            color_discrete_map={"Parents": "#2d7d9a", "Children": "#ee8233", "Total": "#19708b"},
         )
         fig.update_layout(
-            height=380,
-            margin=dict(l=5, r=5, t=20, b=5),
+            height=400,
+            margin=dict(l=10, r=10, t=30, b=10),
             legend_title="",
             paper_bgcolor="rgba(0,0,0,0)",
-            plot_bgcolor="rgba(0,0,0,0)",
+            plot_bgcolor="rgba(245,249,252,0.8)",
+            font=dict(family="Segoe UI, Aptos, sans-serif", size=12),
+            xaxis=dict(gridcolor="rgba(0,0,0,0.05)", showline=True, linecolor="rgba(0,0,0,0.1)"),
+            yaxis=dict(gridcolor="rgba(0,0,0,0.05)", showline=True, linecolor="rgba(0,0,0,0.1)"),
         )
+        fig.update_traces(marker_line_width=1, marker_line_color="rgba(255,255,255,0.5)")
         st.plotly_chart(fig, use_container_width=True, key="trend_chart")
     else:
         st.info("No trend data available for selected filters.")
 
 with col2:
-    st.markdown("### Tower/Track Volume")
+    st.markdown("### 🏢 Tower/Track Volume")
     if not volume_df.empty:
+        # Create enhanced horizontal bar chart
+        colors = ["#19708b", "#2d7d9a", "#5b8f3b", "#ee8233", "#c91414", "#8a6b09", "#6b4f8f"]
         fig = px.bar(
             volume_df.head(15),
             x="Total",
@@ -802,14 +810,19 @@ with col2:
             color="Tower",
             orientation="h",
             template="plotly_white",
+            color_discrete_sequence=colors,
         )
         fig.update_layout(
-            height=380,
-            margin=dict(l=5, r=5, t=20, b=5),
+            height=400,
+            margin=dict(l=10, r=10, t=30, b=10),
             legend_title="Tower",
             paper_bgcolor="rgba(0,0,0,0)",
-            plot_bgcolor="rgba(0,0,0,0)",
+            plot_bgcolor="rgba(245,249,252,0.8)",
+            font=dict(family="Segoe UI, Aptos, sans-serif", size=12),
+            xaxis=dict(gridcolor="rgba(0,0,0,0.05)", showline=True, linecolor="rgba(0,0,0,0.1)"),
+            yaxis=dict(showline=True, linecolor="rgba(0,0,0,0.1)"),
         )
+        fig.update_traces(marker_line_width=1, marker_line_color="rgba(255,255,255,0.5)")
         st.plotly_chart(fig, use_container_width=True, key="volume_chart")
     else:
         st.info("No volume data available for selected filters.")
