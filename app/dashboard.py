@@ -24,7 +24,7 @@ from app.login_block import (
     render_login,
     render_flash,
     initialise_auth_state,
-    _clear_session,
+    clear_session,
 )
 from app.dashboard_data import (
     get_tower_track_hierarchy,
@@ -52,6 +52,38 @@ st.set_page_config(
 # Authentication
 # ============================================================
 initialise_auth_state()
+
+# Inject JavaScript to handle session persistence on page refresh
+if st.session_state.user is None:
+    st.markdown(
+        """
+        <script>
+        // Check for session cookie and redirect to restore session
+        (function() {
+            try {
+                var cookies = document.cookie.split(';');
+                for (var i = 0; i < cookies.length; i++) {
+                    var cookie = cookies[i].trim();
+                    if (cookie.indexOf('qbr_session=') === 0) {
+                        var value = cookie.substring('qbr_session='.length);
+                        if (value) {
+                            // Redirect with session in URL to trigger auto-login
+                            var currentUrl = window.location.href.split('?')[0];
+                            if (window.location.search.indexOf('session=') === -1) {
+                                window.location.href = currentUrl + '?session=' + encodeURIComponent(value);
+                            }
+                        }
+                        break;
+                    }
+                }
+            } catch(e) {
+                console.log('Session check error:', e);
+            }
+        })();
+        </script>
+        """,
+        unsafe_allow_html=True,
+    )
 
 if not st.session_state.user:
     render_flash()
@@ -478,7 +510,7 @@ with st.sidebar:
         st.rerun()
 
     if st.button("🚪 Sign out", use_container_width=True):
-        _clear_session()
+        clear_session()
         st.rerun()
 
     st.divider()

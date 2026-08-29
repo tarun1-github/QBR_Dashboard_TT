@@ -7,6 +7,9 @@ self-service password reset.
 """
 
 import streamlit as st
+import json
+import base64
+from datetime import datetime, timedelta
 
 from app.db import SessionLocal
 from app.auth import (
@@ -69,73 +72,107 @@ def info_message(title: str, detail: str = ""):
     )
 
 
-def initialise_auth_state():
-    defaults = {
-        "user": None,
-        "auth_mode": "login",
-        "pending_alias": "",
-        "flash_message": None,
-        "session_restored": False,
+def _save_session_to_cookie(user: dict):
+    """Save session info to a cookie for persistence across refreshes."""
+    session_data = {
+        "username": user.get("Username", ""),
+        "timestamp": datetime.now().isoformat()
     }
-    for key, value in defaults.items():
-        if key not in st.session_state:
-            st.session_state[key] = value
-    
-    # Restore session from URL parameter or localStorage (prevents logout on refresh)
-    if not st.session_state.session_restored and st.session_state.user is None:
-        st.session_state.session_restored = True
-        
-        # Try to get user from query params (set by JavaScript on refresh)
-        try:
-            query_params = st.query_params
-            user_param = query_params.get("user")
-            if user_param:
-                # User is encoded in URL, restore session
-                import json
-                import base64
-                user_data = json.loads(base64.b64decode(user_param))
-                st.session_state.user = user_data
-                st.session_state.auth_mode = "dashboard"
-                st.query_params.clear()
-                st.rerun()
-        except Exception:
-            pass
-        
-        # Inject JavaScript to check localStorage and redirect with user data
+    encoded = base64.b64encode(json.dumps(session_data).encode()).decode()
+    st.markdown(
+        f"""
+        <script>
+        // Set cookie that expires in 24 hours
+        document.cookie = "qbr_session={encoded}; max-age=86400; path=/";
+        </script>
+        """,
+        unsafe_allow_html=True,
+    )
+
+
+def _clear_cookie():
+    """Clear the session cookie."""
+    st.markdown(
+        """
+        <script>
+        // Clear cookie by setting expiry to past date
+        document.cookie = "qbr_session=; expires=Thu, 01 Jan 1970 00:00:00 UTC; path=/;";
+        </script>
+        """,
+        unsafe_allow_html=True,
+    )
+
+
+def _get_session_from_cookie():
+    """Try to restore session from cookie."""
+    try:
+        # Use JavaScript to read cookie and store in query params
         st.markdown(
             """
             <script>
-            // Check for saved session and restore via URL
+            // Read cookie and store in window.name for Streamlit to pick up
             (function() {
-                try {
-                    var savedUser = localStorage.getItem('qbr_user');
-                    var loginTime = localStorage.getItem('qbr_login_time');
-                    
-                    if (savedUser && loginTime) {
-                        // Check if session is still valid (e.g., 24 hours)
-                        var loginDate = new Date(loginTime);
-                        var now = new Date();
-                        var hoursDiff = (now - loginDate) / (1000 * 60 * 60);
-                        
-                        if (hoursDiff < 24) {
-                            // Redirect with user data in URL
-                            var encodedUser = btoa(savedUser);
-                            var currentUrl = window.location.href.split('?')[0];
-                            window.location.href = currentUrl + '?user=' + encodedUser;
-                        } else {
-                            // Session expired, clear it
-                            localStorage.removeItem('qbr_user');
-                            localStorage.removeItem('qbr_login_time');
-                        }
+                var cookies = document.cookie.split(';');
+                for (var i = 0; i < cookies.length; i++) {
+                    var cookie = cookies[i].trim();
+                    if (cookie.indexOf('qbr_session=') === 0) {
+                        var value = cookie.substring('qbr_session='.length);
+                        window.name = value;
+                        break;
                     }
-                } catch(e) {
-                    console.log('Session restore error:', e);
                 }
             })();
             </script>
             """,
             unsafe_allow_html=True,
         )
+    except Exception:
+        pass
+
+
+def initialise_auth_state():
+    defaults = {
+        "user": None,
+        "auth_mode": "login",
+        "pending_alias": "",
+        "flash_message": None,
+    }
+    for key, value in defaults.items():
+        if key not in st.session_state:
+            st.session_state[key] = value
+    
+    # Try to auto-login from cookie if no user in session
+    if st.session_state.user is None:
+        _try_auto_login()
+
+
+def _try_auto_login():
+    """Try to restore session from cookie."""
+    try:
+        import urllib.parse
+        query_params = st.query_params
+        session_param = query_params.get("session")
+        
+        if session_param:
+            session_data = json.loads(base64.b64decode(session_param))
+            username = session_data.get("username", "")
+            timestamp = session_data.get("timestamp", "")
+            
+            # Check if session is still valid (24 hours)
+            if username and timestamp:
+                session_time = datetime.fromisoformat(timestamp)
+                if (datetime.now() - session_time).total_seconds() < 86400:
+                    # Auto-login the user
+                    db = SessionLocal()
+                    try:
+                        user = get_user(db, username)
+                        if user and user.get("IsActive"):
+                            st.session_state.user = user
+                            st.session_state.auth_mode = "dashboard"
+                    finally:
+                        db.close()
+    except Exception:
+        pass
 
 
 def render_flash():
@@ -151,59 +188,14 @@ def _set_authenticated_user(user: dict):
     # Store the canonical DB fields plus compatibility keys.
     st.session_state.user = user
     st.session_state.auth_mode = "dashboard"
-    # Save to localStorage for session persistence across page refreshes
-    st.markdown(
-        f"""
-        <script>
-        // Save session to localStorage
-        (function() {{
-            try {{
-                localStorage.setItem('qbr_user', JSON.stringify({{
-                    UserID: {user.get('UserID', 0)},
-                    Username: '{user.get('Username', '')}',
-                    DisplayName: '{user.get('DisplayName', '')}',
-                    RoleName: '{user.get('RoleName', '')}',
-                    role: '{user.get('RoleName', '').upper()}',
-                    name: '{user.get('DisplayName', '')}',
-                    username: '{user.get('Username', '')}'
-                }}));
-                localStorage.setItem('qbr_login_time', new Date().toISOString());
-            }} catch(e) {{
-                console.log('Session save error:', e);
-            }}
-        }})();
-        </script>
-        """,
-        unsafe_allow_html=True,
-    )
-
-
-def _clear_session():
-    """Clear session from both Streamlit and localStorage."""
-    st.session_state.user = None
-    st.session_state.auth_mode = "login"
-    st.session_state.pending_alias = ""
-    st.markdown(
-        """
-        <script>
-        // Clear session from localStorage
-        (function() {
-            try {
-                localStorage.removeItem('qbr_user');
-                localStorage.removeItem('qbr_login_time');
-            } catch(e) {
-                console.log('Session clear error:', e);
-            }
-        })();
-        </script>
-        """,
-        unsafe_allow_html=True,
-    )
+    # Save to cookie for session persistence
+    _save_session_to_cookie(user)
 
 
 def _go_login():
     st.session_state.auth_mode = "login"
     st.session_state.pending_alias = ""
+    _clear_cookie()
     st.rerun()
 
 
@@ -652,3 +644,11 @@ def render_login():
                 error_message("Login failed.", str(exc))
             finally:
                 db.close()
+
+
+def clear_session():
+    """Public function to clear session (for sign out)."""
+    st.session_state.user = None
+    st.session_state.auth_mode = "login"
+    st.session_state.pending_alias = ""
+    _clear_cookie()
