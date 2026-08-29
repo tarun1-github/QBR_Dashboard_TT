@@ -1,0 +1,115 @@
+name: Repair current dashboard
+on:
+  push:
+    branches: [test-chatgpt-write]
+jobs:
+  repair:
+    if: ${{ contains(github.event.head_commit.message, '[repair-current]') }}
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: test-chatgpt-write
+          fetch-depth: 0
+      - name: Patch hierarchy and Device handling
+        shell: python
+        run: |
+          from pathlib import Path
+          import re
+
+          # Fix Ticket Tower -> Track resolution. The old logic only handled a
+          # few AssignmentGroup patterns, leaving most imported tickets as Unknown.
+          p = Path('app/dashboard_data.py')
+          s = p.read_text(encoding='utf-8')
+          new_ticket = r'''def _ticket_context(db, alias: str = "tk"):
+              cols = _columns(db, "Ticket")
+              joins = ""
+              has_tower = "TowerID" in cols and _table_exists(db, "Tower")
+              has_track = "TrackID" in cols and _table_exists(db, "Track")
+              has_tt = "TowerTrackID" in cols and _table_exists(db, "TowerTrack")
+              if has_tower:
+                  joins += f" LEFT JOIN qbr.Tower t ON t.TowerID={alias}.TowerID"
+              if has_track:
+                  joins += f" LEFT JOIN qbr.Track tr ON tr.TrackID={alias}.TrackID"
+              if has_tt:
+                  joins += f" LEFT JOIN qbr.TowerTrack tt ON tt.TowerTrackID={alias}.TowerTrackID"
+
+              # Resolve Tower/Track directly from AssignmentGroup when the imported
+              # row has no FK. This uses the actual qbr.Track catalogue first, then
+              # explicit ServiceNow naming patterns used by Foundation and JLK.
+              if "AssignmentGroup" in cols and _table_exists(db, "Track") and _table_exists(db, "Tower"):
+                  joins += f''' OUTER APPLY (
+                      SELECT TOP 1 tr_ag.TrackName, t_ag.TowerName
+                      FROM qbr.Track tr_ag
+                      JOIN qbr.Tower t_ag ON t_ag.TowerID=tr_ag.TowerID
+                      WHERE ISNULL(tr_ag.IsActive,1)=1
+                        AND (
+                          UPPER(ISNULL({alias}.AssignmentGroup,'')) LIKE '%' + UPPER(LTRIM(RTRIM(tr_ag.TrackName))) + '%'
+                          OR (UPPER(ISNULL({alias}.AssignmentGroup,'')) LIKE '%FN-SFNOC%' AND tr_ag.TrackName='SFNOC')
+                          OR (UPPER(ISNULL({alias}.AssignmentGroup,'')) LIKE '%FN-THD%' AND tr_ag.TrackName='THD Data')
+                          OR (UPPER(ISNULL({alias}.AssignmentGroup,'')) LIKE '%HSBC-DATA%' AND tr_ag.TrackName='HSBC Data')
+                          OR (UPPER(ISNULL({alias}.AssignmentGroup,'')) LIKE '%JLK%' AND tr_ag.TrackName='THD Data')
+                        )
+                      ORDER BY LEN(LTRIM(RTRIM(tr_ag.TrackName))) DESC
+                  ) agtr'''
+
+              ag = f"NULLIF(LTRIM(RTRIM({alias}.AssignmentGroup)),'')" if "AssignmentGroup" in cols else "NULL"
+              tf = f"CASE WHEN UPPER(COALESCE({ag},'')) LIKE '%FN-SFNOC%' OR UPPER(COALESCE({ag},'')) LIKE '%FN-THD%' OR UPPER(COALESCE({ag},'')) LIKE '%HSBC-DATA%' OR UPPER(COALESCE({ag},'')) LIKE '%JLK%' THEN COALESCE(agtr.TowerName,'Foundation') ELSE NULL END"
+              trf = f"CASE WHEN UPPER(COALESCE({ag},'')) LIKE '%FN-SFNOC%' THEN 'SFNOC' WHEN UPPER(COALESCE({ag},'')) LIKE '%FN-THD%' OR UPPER(COALESCE({ag},'')) LIKE '%JLK%' THEN 'THD Data' WHEN UPPER(COALESCE({ag},'')) LIKE '%HSBC-DATA%' THEN 'HSBC Data' ELSE NULL END"
+
+              tp=[]; rp=[]
+              if has_tower: tp.append("t.TowerName")
+              if has_tt: tp.append("tt.TowerName")
+              if "AssignmentGroup" in cols and _table_exists(db, "Track") and _table_exists(db, "Tower"): tp.append("agtr.TowerName")
+              if "ProjectName" in cols: tp.append(f"NULLIF(NULLIF(LTRIM(RTRIM({alias}.ProjectName)),''),'Unknown')")
+              tp.append(tf)
+
+              if has_track: rp.append("tr.TrackName")
+              if has_tt: rp.append("tt.TrackName")
+              if "AssignmentGroup" in cols and _table_exists(db, "Track") and _table_exists(db, "Tower"): rp.append("agtr.TrackName")
+              if "TrackName" in cols: rp.append(f"NULLIF(NULLIF(LTRIM(RTRIM({alias}.TrackName)),''),'Unknown')")
+              rp.append(trf)
+
+              tower_expr = "COALESCE(" + ",".join(tp) + ",'Unknown')"
+              track_expr = "COALESCE(" + ",".join(rp) + ",'Unknown')"
+              scope = f"(:tower IS NULL OR {tower_expr}=:tower) AND (:track IS NULL OR {track_expr}=:track)"
+              return cols, joins, tower_expr, track_expr, scope
+
+
+          def _alert_context'''
+          s2 = re.sub(r'def _ticket_context\(db, alias: str = "tk"\):.*?\n\ndef _alert_context', new_ticket, s, count=1, flags=re.S)
+          if s2 == s:
+              raise SystemExit('Could not locate _ticket_context')
+          p.write_text(s2, encoding='utf-8')
+
+          # Make alert chart resilient to older/empty result shapes. Public UI is Device.
+          p = Path('app/dashboard.py')
+          s = p.read_text(encoding='utf-8')
+          old = 'if not alerts.empty:\n        d=alerts.groupby("Device",as_index=False)["Count"].sum().sort_values("Count",ascending=False).head(10);st.plotly_chart(horizontal_bar(d["Device"].astype(str).tolist(),d["Count"].tolist(),"⚡ Highest Alert / Device Frequency","#d3342f",360," alerts"),use_container_width=True,config={"displayModeBar":False})'
+          new = '''if not alerts.empty:
+        if "Device" not in alerts.columns:
+            # Backward-compatible normalization if a cached/older loader still returns Part.
+            if "Part" in alerts.columns:
+                alerts = alerts.rename(columns={"Part": "Device"})
+            else:
+                alerts["Device"] = "Unknown"
+        if "Count" not in alerts.columns:
+            alerts["Count"] = 0
+        d=alerts.groupby("Device",as_index=False)["Count"].sum().sort_values("Count",ascending=False).head(10);st.plotly_chart(horizontal_bar(d["Device"].astype(str).tolist(),d["Count"].tolist(),"⚡ Highest Alert / Device Frequency","#d3342f",360," alerts"),use_container_width=True,config={"displayModeBar":False})'''
+          if old not in s:
+              raise SystemExit('Could not locate alert chart block')
+          p.write_text(s.replace(old,new,1), encoding='utf-8')
+      - name: Validate
+        run: |
+          python -m py_compile app/dashboard.py
+          python -m py_compile app/dashboard_data.py
+          python -m py_compile load_data.py
+      - name: Commit repaired source
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add app/dashboard.py app/dashboard_data.py
+          git commit -m "Repair ticket hierarchy and Device alert handling"
+          git push origin test-chatgpt-write
