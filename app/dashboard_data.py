@@ -31,11 +31,6 @@ def _date_filter(alias: str, date_col: str) -> str:
 
 
 def _assignment_track_case(ag: str) -> str:
-    """Resolve common ServiceNow assignment groups to dashboard tracks.
-
-    This is deliberately kept in SQL so historical rows that were loaded before
-    TowerID/TrackID mapping was corrected can still be displayed correctly.
-    """
     a = f"UPPER(COALESCE({ag},''))"
     return (
         "CASE "
@@ -59,22 +54,15 @@ def _assignment_track_case(ag: str) -> str:
 
 
 def _catalog_track_case(db, ag: str) -> str:
-    """Find a Track catalogue entry when AssignmentGroup already contains a track name.
-
-    This catches data variations such as 'Foundation - THD Data', 'SFNOC', or
-    an assignment-group value containing the exact track name. TOP 1 keeps the
-    expression deterministic when a catalogue contains similar names.
-    """
     if not _table_exists(db, "Track"):
         return "NULL"
     return (
-        "(SELECT TOP 1 tr_ag.TrackName "
-        " FROM qbr.Track tr_ag "
-        " WHERE ISNULL(tr_ag.IsActive,1)=1 "
-        f" AND (UPPER(LTRIM(RTRIM(tr_ag.TrackName))) = UPPER(COALESCE({ag},'')) "
-        f" OR UPPER(COALESCE({ag},'')) LIKE '%' + UPPER(LTRIM(RTRIM(tr_ag.TrackName))) + '%' "
-        f" OR UPPER(LTRIM(RTRIM(tr_ag.TrackName))) LIKE '%' + UPPER(COALESCE({ag},'')) + '%') "
-        " ORDER BY LEN(tr_ag.TrackName) DESC)"
+        "(SELECT TOP 1 tr_ag.TrackName FROM qbr.Track tr_ag "
+        "WHERE ISNULL(tr_ag.IsActive,1)=1 "
+        f"AND (UPPER(LTRIM(RTRIM(tr_ag.TrackName))) = UPPER(COALESCE({ag},'')) "
+        f"OR UPPER(COALESCE({ag},'')) LIKE '%' + UPPER(LTRIM(RTRIM(tr_ag.TrackName))) + '%' "
+        f"OR UPPER(LTRIM(RTRIM(tr_ag.TrackName))) LIKE '%' + UPPER(COALESCE({ag},'')) + '%') "
+        "ORDER BY LEN(tr_ag.TrackName) DESC)"
     )
 
 
@@ -84,7 +72,6 @@ def _ticket_context(db, alias: str = "tk"):
     has_tower = "TowerID" in cols and _table_exists(db, "Tower")
     has_track = "TrackID" in cols and _table_exists(db, "Track")
     has_tt = "TowerTrackID" in cols and _table_exists(db, "TowerTrack")
-
     if has_tower:
         joins += f" LEFT JOIN qbr.Tower t ON t.TowerID={alias}.TowerID"
     if has_track:
@@ -96,8 +83,6 @@ def _ticket_context(db, alias: str = "tk"):
     mapped_track = _assignment_track_case(ag)
     catalog_track = _catalog_track_case(db, ag)
 
-    # Resolution order is important: valid relational IDs first, explicit source
-    # names second, known assignment mappings third, catalogue text matching last.
     track_parts = []
     if "TrackName" in cols:
         track_parts.append(f"NULLIF(NULLIF(LTRIM(RTRIM({alias}.TrackName)),''),'Unknown')")
@@ -106,7 +91,6 @@ def _ticket_context(db, alias: str = "tk"):
     if has_tt:
         track_parts.append("NULLIF(NULLIF(LTRIM(RTRIM(tt.TrackName)),''),'Unknown')")
     track_parts.extend([f"NULLIF({mapped_track},'Unknown')", f"NULLIF({catalog_track},'Unknown')"])
-
     track_expr = "COALESCE(" + ",".join(track_parts) + ",'Unknown')"
 
     tower_parts = []
@@ -116,12 +100,7 @@ def _ticket_context(db, alias: str = "tk"):
         tower_parts.append("NULLIF(NULLIF(LTRIM(RTRIM(t.TowerName)),''),'Unknown')")
     if has_tt:
         tower_parts.append("NULLIF(NULLIF(LTRIM(RTRIM(tt.TowerName)),''),'Unknown')")
-
-    # Foundation is explicitly defined for the three business tracks requested
-    # for this dashboard. For other tracks, derive the tower from qbr.Track.
-    foundation_case = (
-        f"CASE WHEN {track_expr} IN ('SFNOC','THD Data','HSBC Data') THEN 'Foundation' ELSE NULL END"
-    )
+    foundation_case = f"CASE WHEN {track_expr} IN ('SFNOC','THD Data','HSBC Data') THEN 'Foundation' ELSE NULL END"
     track_tower_lookup = (
         "(SELECT TOP 1 t_ag.TowerName FROM qbr.Track tr_ag "
         "JOIN qbr.Tower t_ag ON t_ag.TowerID=tr_ag.TowerID "
@@ -129,10 +108,8 @@ def _ticket_context(db, alias: str = "tk"):
         f"AND UPPER(LTRIM(RTRIM(tr_ag.TrackName)))=UPPER({track_expr}) "
         "ORDER BY tr_ag.TrackID)"
     ) if _table_exists(db, "Track") and _table_exists(db, "Tower") else "NULL"
-
     tower_parts.extend([foundation_case, track_tower_lookup])
     tower_expr = "COALESCE(" + ",".join(tower_parts) + ",'Unknown')"
-
     scope = f"(:tower IS NULL OR {tower_expr}=:tower) AND (:track IS NULL OR {track_expr}=:track)"
     return cols, joins, tower_expr, track_expr, scope
 
@@ -149,11 +126,9 @@ def _alert_context(db, alias: str = "a"):
         joins += f" LEFT JOIN qbr.Track tr ON tr.TrackID={alias}.TrackID"
     if has_tt:
         joins += f" LEFT JOIN qbr.TowerTrack tt ON tt.TowerTrackID={alias}.TowerTrackID"
-
     assignment = f"NULLIF(LTRIM(RTRIM({alias}.AssignmentGroup)),'')" if "AssignmentGroup" in cols else "NULL"
     mapped_track = _assignment_track_case(assignment)
     catalog_track = _catalog_track_case(db, assignment)
-
     track_parts = []
     if "TrackName" in cols:
         track_parts.append(f"NULLIF(NULLIF(LTRIM(RTRIM({alias}.TrackName)),''),'Unknown')")
@@ -163,7 +138,6 @@ def _alert_context(db, alias: str = "a"):
         track_parts.append("NULLIF(NULLIF(LTRIM(RTRIM(tt.TrackName)),''),'Unknown')")
     track_parts.extend([f"NULLIF({mapped_track},'Unknown')", f"NULLIF({catalog_track},'Unknown')"])
     track_expr = "COALESCE(" + ",".join(track_parts) + ",'Unknown')"
-
     tower_parts = []
     if "ProjectName" in cols:
         tower_parts.append(f"NULLIF(NULLIF(LTRIM(RTRIM({alias}.ProjectName)),''),'Unknown')")
@@ -195,8 +169,7 @@ def get_tower_track_hierarchy():
         if _table_exists(db, "Tower") and _table_exists(db, "Track"):
             rows = db.execute(text("SELECT t.TowerID,tr.TrackID,t.TowerName,tr.TrackName FROM qbr.Tower t JOIN qbr.Track tr ON tr.TowerID=t.TowerID WHERE ISNULL(t.IsActive,1)=1 AND ISNULL(tr.IsActive,1)=1 ORDER BY t.TowerName,tr.TrackName")).fetchall()
             for r in rows:
-                tower = str(r.TowerName)
-                track = str(r.TrackName)
+                tower = str(r.TowerName); track = str(r.TrackName)
                 out.setdefault(tower, {}).setdefault(track, {"TowerTrackID": r.TrackID, "TrackName": track})
         result = {tower: list(tracks.values()) for tower, tracks in out.items()}
         if "Foundation" in result:
@@ -234,11 +207,34 @@ def get_alert_total(start_date=None, end_date=None, tower=None, track=None):
 
 
 def get_tower_track_volume(start_date=None, end_date=None, tower=None, track=None):
+    """Return Tower/Track volume without putting scalar subqueries in GROUP BY.
+
+    SQL Server rejects GROUP BY expressions that contain a scalar subquery. The
+    mapping layer intentionally uses scalar lookups for historical records, so
+    resolve Tower/Track in a derived table first and aggregate in the outer query.
+    """
     db = SessionLocal()
     try:
-        cols, joins, tower_expr, track_expr, scope = _ticket_context(db, "tk")
+        cols, joins, tower_expr, track_expr, _scope = _ticket_context(db, "tk")
         date_col = "OpenedAt" if "OpenedAt" in cols else "CreatedAt"
-        q = f"SELECT {tower_expr} Tower,{track_expr} Track,COUNT(*) Total,SUM(CASE WHEN UPPER(ISNULL(tk.TicketType,''))='PARENT' THEN 1 ELSE 0 END) Parents,SUM(CASE WHEN UPPER(ISNULL(tk.TicketType,''))='CHILD' THEN 1 ELSE 0 END) Children FROM qbr.Ticket tk {joins} WHERE {_date_filter('tk',date_col)} AND {scope} GROUP BY {tower_expr},{track_expr} ORDER BY Total DESC"
+        base_where = _date_filter("tk", date_col)
+        q = f"""
+        SELECT b.Tower, b.Track,
+               COUNT(*) AS Total,
+               SUM(CASE WHEN UPPER(ISNULL(b.TicketType,''))='PARENT' THEN 1 ELSE 0 END) AS Parents,
+               SUM(CASE WHEN UPPER(ISNULL(b.TicketType,''))='CHILD' THEN 1 ELSE 0 END) AS Children
+        FROM (
+            SELECT {tower_expr} AS Tower,
+                   {track_expr} AS Track,
+                   tk.TicketType
+            FROM qbr.Ticket tk {joins}
+            WHERE {base_where}
+        ) b
+        WHERE (:tower IS NULL OR b.Tower=:tower)
+          AND (:track IS NULL OR b.Track=:track)
+        GROUP BY b.Tower, b.Track
+        ORDER BY Total DESC
+        """
         rows = db.execute(text(q), _params(start_date, end_date, tower, track)).fetchall()
         return pd.DataFrame([{"Tower": r.Tower, "Track": r.Track, "Total": _safe_int(r.Total), "Parents": _safe_int(r.Parents), "Children": _safe_int(r.Children)} for r in rows])
     finally:
@@ -289,7 +285,6 @@ def get_alert_frequency(start_date=None, end_date=None, tower=None, track=None):
 
 
 def get_parent_child_relation(start_date=None, end_date=None, tower=None, track=None):
-    """Return parent groups and exact child TicketNumber values."""
     db = SessionLocal()
     try:
         cols, joins, tower_expr, track_expr, scope = _ticket_context(db, "c")
@@ -323,10 +318,28 @@ def get_volume_stats(start_date=None, end_date=None, tower=None, track=None):
 
 
 def get_tower_track_alerts(start_date=None, end_date=None, tower=None, track=None):
+    """Return alert summary with Tower/Track resolved before aggregation."""
     db = SessionLocal()
     try:
-        _cols, joins, tower_expr, track_expr, scope = _alert_context(db, "a")
-        q = f"SELECT {tower_expr} Tower,{track_expr} Track,COUNT(*) TotalAlerts,SUM(CASE WHEN UPPER(ISNULL(a.Severity,'')) LIKE '%CRITICAL%' THEN 1 ELSE 0 END) Critical,SUM(CASE WHEN UPPER(ISNULL(a.Severity,'')) LIKE '%HIGH%' THEN 1 ELSE 0 END) High,SUM(CASE WHEN UPPER(ISNULL(a.Severity,'')) LIKE '%MODERATE%' OR UPPER(ISNULL(a.Severity,'')) LIKE '%MEDIUM%' THEN 1 ELSE 0 END) Moderate FROM qbr.Alert a {joins} WHERE {_date_filter('a','AlertTime')} AND {scope} GROUP BY {tower_expr},{track_expr} ORDER BY TotalAlerts DESC,Tower,Track"
+        _cols, joins, tower_expr, track_expr, _scope = _alert_context(db, "a")
+        q = f"""
+        SELECT b.Tower, b.Track,
+               COUNT(*) AS TotalAlerts,
+               SUM(CASE WHEN UPPER(ISNULL(b.Severity,'')) LIKE '%CRITICAL%' THEN 1 ELSE 0 END) AS Critical,
+               SUM(CASE WHEN UPPER(ISNULL(b.Severity,'')) LIKE '%HIGH%' THEN 1 ELSE 0 END) AS High,
+               SUM(CASE WHEN UPPER(ISNULL(b.Severity,'')) LIKE '%MODERATE%' OR UPPER(ISNULL(b.Severity,'')) LIKE '%MEDIUM%' THEN 1 ELSE 0 END) AS Moderate
+        FROM (
+            SELECT {tower_expr} AS Tower,
+                   {track_expr} AS Track,
+                   a.Severity
+            FROM qbr.Alert a {joins}
+            WHERE {_date_filter('a','AlertTime')}
+        ) b
+        WHERE (:tower IS NULL OR b.Tower=:tower)
+          AND (:track IS NULL OR b.Track=:track)
+        GROUP BY b.Tower, b.Track
+        ORDER BY TotalAlerts DESC, b.Tower, b.Track
+        """
         rows = db.execute(text(q), _params(start_date, end_date, tower, track)).fetchall()
         return pd.DataFrame([{"Tower": r.Tower, "Track": r.Track, "TotalAlerts": _safe_int(r.TotalAlerts), "Critical": _safe_int(r.Critical), "High": _safe_int(r.High), "Moderate": _safe_int(r.Moderate)} for r in rows])
     finally:
