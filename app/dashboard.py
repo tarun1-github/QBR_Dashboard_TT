@@ -265,13 +265,13 @@ elif view=="Month":trend=get_monthly_trend(start,end,scope_tower,scope_track);x=
 else:trend=get_quarterly_trend(start,end,scope_tower,scope_track);x="Quarter"
 
 st.markdown('<div class="qbr-section">📈 Executive Volume & Trend</div>',unsafe_allow_html=True)
-st.markdown('<div class="qbr-volume-note">3D executive view • Total tickets are shown as columns; parent and child workload are shown as trend lines. Hover over any column for the exact count.</div>',unsafe_allow_html=True)
+st.markdown('<div class="qbr-volume-note">Executive view • Total tickets are shown as columns; parent and child workload are shown as trend lines. Hover for the exact count.</div>',unsafe_allow_html=True)
 a,b=st.columns([1.45,1])
 with a:
     if not trend.empty:st.plotly_chart(executive_volume_figure(trend,x,"📈 Executive Ticket Volume",430),use_container_width=True,config={"displayModeBar":False})
     else:msg("inf","No ticket trend data.","Try a wider date range.")
 with b:
-    if not vol.empty:st.plotly_chart(ticket_volume_by_tower_track_figure(volume_df,"📊 Ticket Volume by Tower → Track",430),use_container_width=True,config={"displayModeBar":False})
+    if not vol.empty:st.plotly_chart(ticket_volume_by_tower_track_figure(vol,"📊 Ticket Volume by Tower → Track",430),use_container_width=True,config={"displayModeBar":False})
     else:msg("inf","No Tower / Track ticket volume.","No ticket rows match the selected filters.")
 
 st.markdown('<div class="qbr-section">👑 Parent-Child & Alert Analysis</div>',unsafe_allow_html=True);a,b=st.columns(2)
