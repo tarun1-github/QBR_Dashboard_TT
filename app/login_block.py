@@ -75,10 +75,67 @@ def initialise_auth_state():
         "auth_mode": "login",
         "pending_alias": "",
         "flash_message": None,
+        "session_restored": False,
     }
     for key, value in defaults.items():
         if key not in st.session_state:
             st.session_state[key] = value
+    
+    # Restore session from URL parameter or localStorage (prevents logout on refresh)
+    if not st.session_state.session_restored and st.session_state.user is None:
+        st.session_state.session_restored = True
+        
+        # Try to get user from query params (set by JavaScript on refresh)
+        try:
+            query_params = st.query_params
+            user_param = query_params.get("user")
+            if user_param:
+                # User is encoded in URL, restore session
+                import json
+                import base64
+                user_data = json.loads(base64.b64decode(user_param))
+                st.session_state.user = user_data
+                st.session_state.auth_mode = "dashboard"
+                st.query_params.clear()
+                st.rerun()
+        except Exception:
+            pass
+        
+        # Inject JavaScript to check localStorage and redirect with user data
+        st.markdown(
+            """
+            <script>
+            // Check for saved session and restore via URL
+            (function() {
+                try {
+                    var savedUser = localStorage.getItem('qbr_user');
+                    var loginTime = localStorage.getItem('qbr_login_time');
+                    
+                    if (savedUser && loginTime) {
+                        // Check if session is still valid (e.g., 24 hours)
+                        var loginDate = new Date(loginTime);
+                        var now = new Date();
+                        var hoursDiff = (now - loginDate) / (1000 * 60 * 60);
+                        
+                        if (hoursDiff < 24) {
+                            // Redirect with user data in URL
+                            var encodedUser = btoa(savedUser);
+                            var currentUrl = window.location.href.split('?')[0];
+                            window.location.href = currentUrl + '?user=' + encodedUser;
+                        } else {
+                            // Session expired, clear it
+                            localStorage.removeItem('qbr_user');
+                            localStorage.removeItem('qbr_login_time');
+                        }
+                    }
+                } catch(e) {
+                    console.log('Session restore error:', e);
+                }
+            })();
+            </script>
+            """,
+            unsafe_allow_html=True,
+        )
 
 
 def render_flash():
@@ -94,6 +151,54 @@ def _set_authenticated_user(user: dict):
     # Store the canonical DB fields plus compatibility keys.
     st.session_state.user = user
     st.session_state.auth_mode = "dashboard"
+    # Save to localStorage for session persistence across page refreshes
+    st.markdown(
+        f"""
+        <script>
+        // Save session to localStorage
+        (function() {{
+            try {{
+                localStorage.setItem('qbr_user', JSON.stringify({{
+                    UserID: {user.get('UserID', 0)},
+                    Username: '{user.get('Username', '')}',
+                    DisplayName: '{user.get('DisplayName', '')}',
+                    RoleName: '{user.get('RoleName', '')}',
+                    role: '{user.get('RoleName', '').upper()}',
+                    name: '{user.get('DisplayName', '')}',
+                    username: '{user.get('Username', '')}'
+                }}));
+                localStorage.setItem('qbr_login_time', new Date().toISOString());
+            }} catch(e) {{
+                console.log('Session save error:', e);
+            }}
+        }})();
+        </script>
+        """,
+        unsafe_allow_html=True,
+    )
+
+
+def _clear_session():
+    """Clear session from both Streamlit and localStorage."""
+    st.session_state.user = None
+    st.session_state.auth_mode = "login"
+    st.session_state.pending_alias = ""
+    st.markdown(
+        """
+        <script>
+        // Clear session from localStorage
+        (function() {
+            try {
+                localStorage.removeItem('qbr_user');
+                localStorage.removeItem('qbr_login_time');
+            } catch(e) {
+                console.log('Session clear error:', e);
+            }
+        })();
+        </script>
+        """,
+        unsafe_allow_html=True,
+    )
 
 
 def _go_login():

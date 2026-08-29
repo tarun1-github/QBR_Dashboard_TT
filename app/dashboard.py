@@ -24,6 +24,7 @@ from app.login_block import (
     render_login,
     render_flash,
     initialise_auth_state,
+    _clear_session,
 )
 from app.dashboard_data import (
     get_tower_track_hierarchy,
@@ -477,8 +478,7 @@ with st.sidebar:
         st.rerun()
 
     if st.button("🚪 Sign out", use_container_width=True):
-        st.session_state.user = None
-        st.session_state.auth_mode = "login"
+        _clear_session()
         st.rerun()
 
     st.divider()
@@ -608,8 +608,8 @@ kpis = get_executive_kpis(start_date, end_date, tower_id, track_id)
 volume_df = get_tower_track_volume(start_date, end_date)
 alert_freq_df = get_alert_frequency(start_date, end_date, tower_id, track_id)
 parent_child_result = get_parent_child_relation(start_date, end_date, tower_id, track_id)
-parent_child_df = parent_child_result[0] if parent_child_result else pd.DataFrame()
-child_details_df = parent_child_result[1] if len(parent_child_result) > 1 else pd.DataFrame()
+parent_child_df = parent_child_result[0] if parent_child_result is not None and len(parent_child_result) > 0 else pd.DataFrame()
+child_details_df = parent_child_result[1] if parent_child_result is not None and len(parent_child_result) > 1 else pd.DataFrame()
 volume_stats = get_volume_stats(start_date, end_date, tower_id, track_id)
 
 # Filter volume dataframe by tower/track selection
