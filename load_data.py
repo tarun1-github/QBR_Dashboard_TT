@@ -399,7 +399,7 @@ def main():
     parser.add_argument('--file', help='Specific file to load')
     parser.add_argument('--show-summary', action='store_true', help='Show data summary')
     parser.add_argument('--clear', action='store_true', help='Clear all data before loading')
-    parser.add_argument('--dataset-folder', default='app/dataset', help='Dataset folder path')
+    parser.add_argument('--dataset-folder', default='app/dataset', help='Dataset folder path (default: app/dataset)')
     
     args = parser.parse_args()
     
