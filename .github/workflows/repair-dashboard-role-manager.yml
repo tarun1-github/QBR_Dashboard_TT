@@ -17,27 +17,35 @@ jobs:
         shell: python
         run: |
           from pathlib import Path
-          import re
-
           p = Path("app/dashboard.py")
-          s = p.read_text(encoding="utf-8")
-          original = s
+          lines = p.read_text(encoding="utf-8").splitlines(keepends=True)
+          original = list(lines)
 
-          # Remove the second sidebar block introduced by the merge. It starts
-          # with the undefined variable r and duplicates the Tower selector.
-          pattern = r'\n    st\.divider\(\);allowed=assigned_tracks\(uname\(\)\) if r=="MANAGER" else \[\].*?\n    st\.markdown\(\'<div class="qbr-side-head">2'
-          replacement = '\n    st.markdown(\'<div class="qbr-side-head">2'
-          s, n1 = re.subn(pattern, replacement, s, count=1, flags=re.S)
+          # Find the accidental second sidebar block. The first occurrence is
+          # valid; the block containing `r=="MANAGER"` is the bad merge copy.
+          start = next((i for i, line in enumerate(lines) if 'if r=="MANAGER"' in line), None)
+          if start is not None:
+              end = next((i for i in range(start, len(lines)) if '2️⃣ TRACK' in lines[i]), None)
+              if end is not None:
+                  del lines[start:end]
 
-          # Remove an immediately repeated admin selector statement if present.
-          admin_pattern = r'(?m)^(        tsel=st\.selectbox\("Tower",towers,key="admin_tower"\);.*?aa,bb,cc=st\.columns\(3\)\n)\\1'
-          s, n2 = re.subn(admin_pattern, r'\\1', s, count=1, flags=re.S)
+          # Collapse a duplicated admin selector if present.
+          needle = 'tsel=st.selectbox("Tower",towers,key="admin_tower")'
+          seen = 0
+          cleaned = []
+          for line in lines:
+              if needle in line:
+                  seen += 1
+                  if seen > 1:
+                      continue
+              cleaned.append(line)
+          lines = cleaned
 
-          if s != original:
-              p.write_text(s, encoding="utf-8")
-              print(f"Repaired dashboard.py: sidebar={n1}, admin={n2}")
+          if lines != original:
+              p.write_text(''.join(lines), encoding="utf-8")
+              print("dashboard.py repaired")
           else:
-              print("No merge artifacts matched; leaving dashboard.py unchanged.")
+              print("No merge artifacts found")
 
       - name: Validate Python syntax
         run: python -m py_compile app/dashboard.py
