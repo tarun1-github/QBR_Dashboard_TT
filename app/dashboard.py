@@ -166,14 +166,6 @@ with st.sidebar:
     st.markdown('<div class="qbr-side-head">1️⃣ TOWER</div>',unsafe_allow_html=True)
     tower=st.selectbox("Tower",["All"]+tower_options,label_visibility="collapsed",key="scope_tower")
     tracks=sorted({track_name for track_list in hierarchy.values() for track_name in track_list}) if tower=="All" else sorted([str(track_name) for track_name in hierarchy.get(tower,[])])
-    st.divider();allowed=assigned_tracks(uname()) if r=="MANAGER" else []
-    tower_options=sorted({x[0] for x in allowed}) if r=="MANAGER" else sorted(hierarchy.keys())
-    st.markdown('<div class="qbr-side-head">1️⃣ TOWER</div>',unsafe_allow_html=True);tower=st.selectbox("Tower",["All"]+tower_options,label_visibility="collapsed",key="scope_tower")
-    tracks = (
-    sorted({str(track_name) for track_list in hierarchy.values() for track_name in track_list})
-    if tower == "All"
-    else sorted([str(track_name) for track_name in hierarchy.get(tower, [])])
-    )
     st.markdown('<div class="qbr-side-head">2️⃣ TRACK</div>',unsafe_allow_html=True);track=st.selectbox("Track",["All"]+tracks,label_visibility="collapsed",key="scope_track")
     st.markdown('<div class="qbr-side-head">3️⃣ TIME VIEW</div>',unsafe_allow_html=True);view=st.selectbox("Time View",["Day","Week","Month","Quarter"],key="scope_view")
     st.markdown('<div class="qbr-side-head">📅 REPORT DATE RANGE</div>',unsafe_allow_html=True);dr=st.date_input("Report Date Range",value=(date(2026,7,15),date.today()),min_value=date(2020,1,1),max_value=date.today(),label_visibility="collapsed",key="scope_dates")
@@ -231,7 +223,6 @@ if role() in ("SUPERUSER","SUPERVISOR"):
     st.markdown('<div class="qbr-section">👥 Manager & Role Administration</div>',unsafe_allow_html=True);st.caption("Assignment rule: one manager per Tower → Track, and one Tower → Track per manager.");users=manager_users();active_managers=[u for u in users if str(u["RoleName"]).upper()=="MANAGER"];towers=sorted(hierarchy.keys())
     if towers and active_managers:
         tsel=st.selectbox("Tower",towers,key="admin_tower");trsel=st.selectbox("Track",[str(track_name) for track_name in hierarchy.get(tsel,[])],key="admin_track");msel=st.selectbox("Manager",[u["Username"] for u in active_managers],format_func=lambda x:next((f'{u["DisplayName"]} • {u["RoleName"]}' for u in active_managers if u["Username"]==x),x),key="admin_manager");aa,bb,cc=st.columns(3)
-        tsel=st.selectbox("Tower",towers,key="admin_tower");trsel=st.selectbox("Track",[str(track_name) for track_name in hierarchy.get(tsel, [])],key="admin_track");msel=st.selectbox("Manager",[u["Username"] for u in active_managers],format_func=lambda x:next((f'{u["DisplayName"]} • {u["RoleName"]}' for u in active_managers if u["Username"]==x),x),key="admin_manager");aa,bb,cc=st.columns(3)
         with aa:
             if st.button("➕ Assign Manager",use_container_width=True):
                 ok,detail=assign_manager(msel,tsel,trsel);msg("ok" if ok else "bad","Assignment successful." if ok else "Assignment failed.",detail)
