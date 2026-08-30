@@ -13,7 +13,7 @@ jobs:
     steps:
       - uses: actions/checkout@v4
 
-      - name: Remove duplicate role-manager/sidebar merge block
+      - name: Repair dashboard merge artifacts
         shell: python
         run: |
           from pathlib import Path
@@ -21,32 +21,23 @@ jobs:
 
           p = Path("app/dashboard.py")
           s = p.read_text(encoding="utf-8")
+          original = s
 
-          # The merge introduced a second sidebar block beginning with an
-          # undefined variable `r`. The first sidebar block already provides
-          # Tower, Track, Time View and Date Range, so remove the duplicate.
-          pattern = (
-              r'\n    st\.divider\(\);allowed=assigned_tracks\(uname\(\)\) if r=="MANAGER" else \[\]'
-              r'.*?'
-              r'\n    st\.markdown\(\'<div class="qbr-side-head">2️⃣ TRACK</div>\''
-          )
-          replacement = '\n    st.markdown(\'<div class="qbr-side-head">2️⃣ TRACK</div>\''
-          s2, n = re.subn(pattern, replacement, s, count=1, flags=re.S)
+          # Remove the second sidebar block introduced by the merge. It starts
+          # with the undefined variable r and duplicates the Tower selector.
+          pattern = r'\n    st\.divider\(\);allowed=assigned_tracks\(uname\(\)\) if r=="MANAGER" else \[\].*?\n    st\.markdown\(\'<div class="qbr-side-head">2'
+          replacement = '\n    st.markdown(\'<div class="qbr-side-head">2'
+          s, n1 = re.subn(pattern, replacement, s, count=1, flags=re.S)
 
-          # Also remove an accidental duplicated admin selector line if the
-          # merge produced it twice consecutively.
-          admin_line = r'(?m)^(        tsel=st\.selectbox\("Tower",towers,key="admin_tower"\);.*?aa,bb,cc=st\.columns\(3\)\n)'
-          m = list(re.finditer(admin_line, s2))
-          if len(m) > 1:
-              start, end = m[1].span()
-              s2 = s2[:start] + s2[end:]
-              n += 1
+          # Remove an immediately repeated admin selector statement if present.
+          admin_pattern = r'(?m)^(        tsel=st\.selectbox\("Tower",towers,key="admin_tower"\);.*?aa,bb,cc=st\.columns\(3\)\n)\\1'
+          s, n2 = re.subn(admin_pattern, r'\\1', s, count=1, flags=re.S)
 
-          if n:
-              p.write_text(s2, encoding="utf-8")
-              print(f"dashboard.py repaired ({n} change(s))")
+          if s != original:
+              p.write_text(s, encoding="utf-8")
+              print(f"Repaired dashboard.py: sidebar={n1}, admin={n2}")
           else:
-              print("No matching merge-conflict block found.")
+              print("No merge artifacts matched; leaving dashboard.py unchanged.")
 
       - name: Validate Python syntax
         run: python -m py_compile app/dashboard.py
