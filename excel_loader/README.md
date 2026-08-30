@@ -1,50 +1,46 @@
-# QBR Excel Data Loader
+# QBR Excel Loader Prototype
 
-This folder contains the Excel/VBA + Power Query starter implementation for the QBR ticket loader.
+This folder contains the Windows/Excel prototype for the QBR ticket loader.
 
-## Files
+## Components
 
-- `QBR_LoadData.bas` - VBA module. Imports one or more QBR Excel files, keeps the ticket fields, normalizes CompanyAccount, classifies EMS/CMSP callers, applies Customer -> Tower -> Track mapping, detects duplicates, and builds load-report sheets.
-- `QBR_Tickets_PowerQuery.pq` - Power Query M template for the same normalization rules.
+- `VBA/QBR_LoadData.bas` - VBA UI/orchestration module.
+- `PowerQuery/QBR_Tickets.pq` - Power Query transformation.
+- `PowerQuery/QBR_DataQuality.pq` - invalid-record output.
+- `PowerQuery/QBR_Duplicates.pq` - duplicate-record output.
+- `PowerQuery/Customer_Mapping.csv` - customer/company/tower/track mapping.
+- `DummyData/Created_tickets.csv` and `DummyData/Closed_tickets.csv` - safe dummy data only.
 
 ## Business rules
 
-1. Input files are normally `Created_tickets.xlsx` and `Closed_tickets.xlsx`.
-2. Ticket number is required. Blank ticket numbers are invalid.
-3. Duplicate TicketNumber values are sent to Duplicate Records.
-4. If CompanyAccount contains `Home` (case-insensitive), it is normalized to `Home Depot`.
-5. Customer mapping supplies TowerName and TrackName.
-6. Caller containing `EMS` or `CMSP` is classified as Monitoring; all other callers are User.
-7. Legacy input field `Part` is accepted and normalized to `Device`.
-8. The loader preserves the QBR ticket-centric fields used by the current application: TicketNumber, ParentTicketNumber, TicketType, ProjectName, TrackName, AssignmentGroup, CompanyAccount, CustomerName, TowerName, ConfigurationItem, Service, Device, Caller, Priority, State, Impact, ShortDescription, OpenedAt, CreatedAt, UpdatedAt, ClosedAt, CandidateForVE, VETimeSavedMinutes, ResolutionCode, CauseCode, SourceFile, IsMonitoringGenerated.
+1. Preserve the QBR ticket-centric fields used by the current application.
+2. `Part` is accepted as a legacy input alias and normalized to `Device`.
+3. Company accounts containing `Home` are normalized to `Home Depot`.
+4. Caller containing `EMS` or `CMSP` is classified as `Monitoring`; all other callers are `User`.
+5. Duplicate ticket numbers are reported rather than stopping the complete load.
+6. Invalid rows are reported separately.
+7. Customer mapping supplies Tower and Track.
+
+## QBR fields represented by the dummy files
+
+`Number`, `Parent Incident`, `Ticket Type`, `Project Name`, `Track Name`, `Assignment group`, `Company account`, `Configuration item`, `Service`, `Part`, `Device`, `Caller`, `Priority`, `State`, `Impact`, `Short description`, `Opened`, `Created`, `Updated`, `Closed`, `CandidateForVE`, `VETimeSavedMinutes`, `Resolution code`, `Cause code`.
+
+The normalized model uses: `TicketNumber`, `ParentTicketNumber`, `TicketType`, `ProjectName`, `TrackName`, `AssignmentGroup`, `CompanyAccount`, `ConfigurationItem`, `Service`, `Device`, `Caller`, `Priority`, `State`, `Impact`, `ShortDescription`, `OpenedAt`, `CreatedAt`, `UpdatedAt`, `ClosedAt`, `CandidateForVE`, `VETimeSavedMinutes`, `ResolutionCode`, `CauseCode`, plus derived `CallerType`, `ValidationStatus`, `DuplicateFlag`, and `LoadStatus`.
 
 ## Excel setup
 
-1. Create a blank macro-enabled workbook: `QBR_Data_Loader.xlsm`.
-2. Open Excel -> Developer -> Visual Basic.
-3. Insert -> Module.
-4. Copy the contents of `QBR_LoadData.bas` into the module.
-5. Run `SetupQBRLoader` once.
-6. On `Load Control`, click `SELECT FILES` and select one or more Created/Closed Excel files.
-7. Click `LOAD DATA`.
-8. Review `Load Summary`, `Loaded Records`, `Duplicate Records`, `Invalid Records`, `Unmapped Company`, and `Errors`.
+1. Create a blank macro-enabled workbook named `QBR_Data_Loader.xlsm`.
+2. Open VBA (`Alt+F11`), Insert > Module, and paste/import `VBA/QBR_LoadData.bas`.
+3. Run `SetupQBRLoader` once.
+4. The VBA loader creates the `QBR Input Files` table after files are selected.
+5. Add the Power Query `QBR_Tickets` from `PowerQuery/QBR_Tickets.pq` and load it to a worksheet/Data Model.
+6. Add the dependent `QBR_DataQuality` and `QBR_Duplicates` queries.
+7. Create the requested report sheets: `Load Summary`, `Loaded Records`, `Duplicate Records`, `Invalid Records`, `Unmapped Company`, `Errors`, and `Load History`.
 
 ## Dummy-data test
 
-Use dummy copies of the Created/Closed files. Include at least:
-
-- one normal user ticket with caller `engineer1`
-- one monitoring ticket with caller `EMS Controller Events`
-- one monitoring ticket with caller `ems_splunk_homd1`
-- one monitoring ticket with caller `CMSP`
-- one company value such as `Domain HomeDepot` to verify normalization to `Home Depot`
-- one duplicate TicketNumber
-- one blank TicketNumber
-- one unmapped company
-- one legacy `Part` column instead of `Device`
-
-No production data is embedded in this repository.
+The dummy data deliberately includes normal user tickets, EMS/CMSP monitoring tickets, a `Home` company variant, a duplicate TicketNumber, an invalid record, and an unmapped-company scenario. No production ticket data is included.
 
 ## Important
 
-The VBA workbook is intentionally separate from the Python/Streamlit Docker application. It is an Excel-side ingestion/testing tool. The next milestone can connect its output to the QBR SQL database through an approved API/import mechanism rather than giving Excel direct production database credentials.
+The VBA workbook is an Excel-side ingestion/testing tool. Do not put SQL passwords, API keys, or other production secrets into the workbook or Git repository. The production integration should use an approved API/import mechanism rather than embedding database credentials in Excel.
