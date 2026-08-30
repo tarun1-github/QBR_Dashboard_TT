@@ -2,7 +2,7 @@
 
 Single-fact model:
   * qbr.Ticket stores every ticket.
-  * Caller EMS/CMSP => IsMonitoringGenerated=1 (monitoring/alert-origin ticket).
+  * Caller containing EMS/CMSP => IsMonitoringGenerated=1.
   * qbr.Customer maps normalized CompanyAccount -> Tower -> Track.
   * Duplicate TicketNumber rows are written to _duplicate_records.xlsx and only
     one merged row is loaded.
@@ -41,6 +41,12 @@ def key(v):
     if s.endswith(".0") and s[:-2].isdigit():
         s = s[:-2]
     return s.upper()
+
+
+def is_monitoring_caller(value):
+    """True when Caller identifies EMS/CMSP monitoring, including named variants."""
+    caller_key = key(value)
+    return "EMS" in caller_key or "CMSP" in caller_key
 
 
 def first(row, names):
@@ -300,7 +306,7 @@ def load(merged, db, replace):
 
             parent = first(row, ["Parent Incident", "ParentIncident", "Parent_Incident", "ParentTicketNumber", "Parent"])
             caller = first(row, ["Caller", "caller"])
-            monitoring = key(caller) in {"EMS", "CMSP"}
+            monitoring = is_monitoring_caller(caller)
             opened = dt(row, ["Opened", "OpenedAt", "Opened_At"])
             created = dt(row, ["Created", "CreatedAt", "Created_Date"]) or opened
             updated = dt(row, ["Updated", "UpdatedAt", "Updated_Date"])
@@ -312,7 +318,7 @@ def load(merged, db, replace):
             short = short[:500] if short else None
 
             exists = db.execute(
-                text("SELECT 1 FROM qbr.Ticket WHERE TicketNumber=:tn"), {"tn": ticket_number}
+                text("SELECT 1 FROM qbr.Ticket WHERE UPPER(LTRIM(RTRIM(TicketNumber)))=:tn_key"), {"tn_key": ticket_key}
             ).first()
             if exists and not replace:
                 skipped += 1
@@ -435,7 +441,11 @@ def main():
             print(f"  {name} moved successfully")
         print(f"Moved location: {destination}")
         print(f"Tickets loaded: {loaded:,}")
-        print(f"Monitoring-generated tickets (Caller EMS/CMSP): {sum(1 for x in merged.to_dict('records') if key(first(pd.Series(x), ['Caller','caller'])) in {'EMS','CMSP'}):,}")
+        monitoring_rows = sum(
+            1 for x in merged.to_dict("records")
+            if is_monitoring_caller(first(pd.Series(x), ["Caller", "caller"]))
+        )
+        print(f"Monitoring-generated tickets (Caller contains EMS/CMSP): {monitoring_rows:,}")
         print(f"Duplicate occurrences recorded: {duplicate_rows:,}")
         print(f"Unique merged rows: {merged_rows:,}")
         print(f"Existing/skipped tickets: {skipped:,}")
