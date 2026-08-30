@@ -1,0 +1,60 @@
+name: Repair dashboard role-manager merge
+
+on:
+  push:
+    branches: [test-chatgpt-write]
+
+permissions:
+  contents: write
+
+jobs:
+  repair:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Remove duplicate role-manager/sidebar merge block
+        shell: python
+        run: |
+          from pathlib import Path
+          p = Path("app/dashboard.py")
+          s = p.read_text(encoding="utf-8")
+
+          bad_sidebar = '''    st.divider();allowed=assigned_tracks(uname()) if r=="MANAGER" else []
+          tower_options=sorted({x[0] for x in allowed}) if r=="MANAGER" else sorted(hierarchy.keys())
+          st.markdown('<div class="qbr-side-head">1️⃣ TOWER</div>',unsafe_allow_html=True);tower=st.selectbox("Tower",["All"]+tower_options,label_visibility="collapsed",key="scope_tower")
+          tracks = (
+          sorted({str(track_name) for track_list in hierarchy.values() for track_name in track_list})
+          if tower == "All"
+          else sorted([str(track_name) for track_name in hierarchy.get(tower, [])])
+          )
+          '''
+          s2 = s.replace(bad_sidebar, "", 1)
+
+          # The merge also duplicated the admin selectors. Keep one copy.
+          duplicate_admin = '''        tsel=st.selectbox("Tower",towers,key="admin_tower");trsel=st.selectbox("Track",[str(track_name) for track_name in hierarchy.get(tsel,[])],key="admin_track");msel=st.selectbox("Manager",[u["Username"] for u in active_managers],format_func=lambda x:next((f'{u["DisplayName"]} • {u["RoleName"]}' for u in active_managers if u["Username"]==x),x),key="admin_manager");aa,bb,cc=st.columns(3)
+          '''
+          # If the exact block appears twice consecutively, collapse it to one.
+          s2 = s2.replace(duplicate_admin + duplicate_admin, duplicate_admin, 1)
+
+          if s2 == s:
+              print("No repair needed; expected merge block not found.")
+          else:
+              p.write_text(s2, encoding="utf-8")
+              print("dashboard.py repaired")
+
+      - name: Validate Python syntax
+        run: python -m py_compile app/dashboard.py
+
+      - name: Commit repaired dashboard
+        shell: bash
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add app/dashboard.py
+          if git diff --cached --quiet; then
+            echo "No dashboard changes to commit."
+            exit 0
+          fi
+          git commit -m "Fix dashboard role-manager merge conflict"
+          git push
