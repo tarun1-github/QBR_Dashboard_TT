@@ -3,7 +3,7 @@
 Architecture rule:
     qbr.Ticket is the single fact table.
     qbr.Customer is the authoritative CompanyAccount -> Tower -> Track map.
-    Caller EMS/CMSP identifies monitoring-generated tickets.
+    Caller containing EMS/CMSP identifies monitoring-generated tickets.
 
 No dashboard query depends on qbr.Alert or qbr.TicketAlert.
 """
@@ -42,14 +42,23 @@ def _normal_account_expr(alias: str) -> str:
     return f"CASE WHEN UPPER(LTRIM(RTRIM(ISNULL({alias}.CompanyAccount,'')))) LIKE '%HOME%' THEN 'Home Depot' ELSE LTRIM(RTRIM(ISNULL({alias}.CompanyAccount,''))) END"
 
 
+def _monitoring_predicate(alias: str = "tk") -> str:
+    """Monitoring event rule: Caller contains EMS or CMSP."""
+    return (
+        f"(UPPER(LTRIM(RTRIM(ISNULL({alias}.Caller,'')))) LIKE '%EMS%' "
+        f"OR UPPER(LTRIM(RTRIM(ISNULL({alias}.Caller,'')))) LIKE '%CMSP%')"
+    )
+
+
 def _ticket_context(db, alias: str = "tk"):
-    """Resolve tickets using Customer first, then existing Ticket IDs, then safe fallbacks."""
+    """Resolve CompanyAccount -> Customer -> Tower/Track first, then legacy FK values."""
     cols = _columns(db, "Ticket")
     joins = ""
 
     if _table_exists(db, "Customer"):
         joins += (
-            f" LEFT JOIN qbr.Customer cust ON UPPER(LTRIM(RTRIM(ISNULL(cust.CompanyAccountName,''))))="
+            f" LEFT JOIN qbr.Customer cust "
+            f"ON UPPER(LTRIM(RTRIM(ISNULL(cust.CompanyAccountName,''))))="
             f"UPPER({_normal_account_expr(alias)}) AND ISNULL(cust.IsActive,1)=1"
         )
         joins += " LEFT JOIN qbr.Track tr_cust ON tr_cust.TrackID=cust.TrackID AND ISNULL(tr_cust.IsActive,1)=1"
@@ -64,7 +73,7 @@ def _ticket_context(db, alias: str = "tk"):
     if _table_exists(db, "Customer"):
         track_parts.append("NULLIF(LTRIM(RTRIM(tr_cust.TrackName)),'')")
     if "TrackName" in cols:
-        track_parts.append(f"NULLIF(LTRIM(RTRIM({alias}.TrackName)),'')")
+        track_parts.append(f"NULLIF(NULLIF(LTRIM(RTRIM({alias}.TrackName)),''),'Unknown')")
     if "TrackID" in cols and _table_exists(db, "Track"):
         track_parts.append("NULLIF(LTRIM(RTRIM(tr.TrackName)),'')")
 
@@ -88,15 +97,16 @@ def _ticket_context(db, alias: str = "tk"):
             f"WHEN {ag} LIKE '%RIL%' THEN 'RIL' "
             "ELSE NULL END"
         )
-
     track_expr = "COALESCE(" + ",".join(track_parts) + ",'Unknown')"
+
     tower_parts = []
     if _table_exists(db, "Customer"):
         tower_parts.append("NULLIF(LTRIM(RTRIM(tw_cust.TowerName)),'')")
     if "TowerID" in cols and _table_exists(db, "Tower"):
         tower_parts.append("NULLIF(LTRIM(RTRIM(tw.TowerName)),'')")
+    # ProjectName is not authoritative; keep only as a last legacy fallback.
     if "ProjectName" in cols:
-        tower_parts.append(f"NULLIF(LTRIM(RTRIM({alias}.ProjectName)),'')")
+        tower_parts.append(f"NULLIF(NULLIF(LTRIM(RTRIM({alias}.ProjectName)),''),'Unknown')")
     tower_parts.append(f"CASE WHEN {track_expr} IN ('SFNOC','THD Data','HSBC Data') THEN 'Foundation' ELSE NULL END")
     tower_expr = "COALESCE(" + ",".join(tower_parts) + ",'Unknown')"
     scope = f"(:tower IS NULL OR {tower_expr}=:tower) AND (:track IS NULL OR {track_expr}=:track)"
@@ -109,22 +119,25 @@ def get_tower_track_hierarchy():
         rows = db.execute(text("SELECT t.TowerName,tr.TrackName FROM qbr.Track tr JOIN qbr.Tower t ON t.TowerID=tr.TowerID WHERE ISNULL(t.IsActive,1)=1 AND ISNULL(tr.IsActive,1)=1 ORDER BY t.DisplayOrder,tr.DisplayOrder,tr.TrackName")).fetchall()
         result = {}
         for row in rows:
-            tower,track = str(row.TowerName),str(row.TrackName)
+            tower, track = str(row.TowerName), str(row.TrackName)
             if tower == "Foundation" and track.upper() in {"THD", "DATA FOUNDATION", "THD DATA"}:
                 track = "THD Data"
-            result.setdefault(tower,[])
-            if track not in result[tower]: result[tower].append(track)
+            result.setdefault(tower, [])
+            if track not in result[tower]:
+                result[tower].append(track)
         if "Foundation" in result:
-            desired=["SFNOC","THD Data","HSBC Data"]
-            result["Foundation"]=[x for x in desired if x in result["Foundation"]]
+            desired = ["SFNOC", "THD Data", "HSBC Data"]
+            result["Foundation"] = [x for x in desired if x in result["Foundation"]]
         return result
-    finally: db.close()
+    finally:
+        db.close()
 
 
 def get_executive_kpis(start_date=None,end_date=None,tower=None,track=None):
     db=SessionLocal()
     try:
-        cols,joins,_tower,_track,scope=_ticket_context(db,"tk");date_col="OpenedAt" if "OpenedAt" in cols else "CreatedAt"
+        cols,joins,_tower,_track,scope=_ticket_context(db,"tk")
+        date_col="OpenedAt" if "OpenedAt" in cols else "CreatedAt"
         parent="CASE WHEN UPPER(ISNULL(tk.TicketType,''))='PARENT' THEN 1 ELSE 0 END" if "TicketType" in cols else "0"
         child="CASE WHEN UPPER(ISNULL(tk.TicketType,''))='CHILD' THEN 1 ELSE 0 END" if "TicketType" in cols else "0"
         closed="CASE WHEN tk.ClosedAt IS NOT NULL THEN 1 ELSE 0 END" if "ClosedAt" in cols else "CASE WHEN LOWER(ISNULL(tk.State,''))='closed' THEN 1 ELSE 0 END"
@@ -142,8 +155,8 @@ def get_alert_total(start_date=None,end_date=None,tower=None,track=None):
         cols,joins,_tower,_track,scope=_ticket_context(db,"tk")
         if "Caller" not in cols:return 0
         date_col="OpenedAt" if "OpenedAt" in cols else "CreatedAt"
-        monitoring_predicate = _monitoring_predicate("tk")
-        q=f"SELECT COUNT(*) FROM qbr.Ticket tk {joins} WHERE {monitoring_predicate} AND {_date_filter('tk',date_col)} AND {scope}"
+        pred=_monitoring_predicate("tk")
+        q=f"SELECT COUNT(*) FROM qbr.Ticket tk {joins} WHERE {pred} AND {_date_filter('tk',date_col)} AND {scope}"
         return _safe_int(db.execute(text(q),_params(start_date,end_date,tower,track)).scalar())
     finally: db.close()
 
@@ -187,8 +200,8 @@ def get_alert_frequency(start_date=None,end_date=None,tower=None,track=None):
         cols,joins,_tower,_track,scope=_ticket_context(db,"tk");date_col="OpenedAt" if "OpenedAt" in cols else "CreatedAt"
         if "Caller" not in cols:return pd.DataFrame(columns=["Device","AlertType","Severity","Count"])
         device="ISNULL(tk.Device,'Unknown')" if "Device" in cols else ("ISNULL(tk.Part,'Unknown')" if "Part" in cols else "'Unknown'")
-        monitoring_predicate = _monitoring_predicate("tk")
-        q=f"SELECT {device} Device,'Monitoring-generated ticket' AlertType,ISNULL(tk.Priority,'Unknown') Severity,COUNT(*) AlertCount FROM qbr.Ticket tk {joins} WHERE {monitoring_predicate} AND {_date_filter('tk',date_col)} AND {scope} GROUP BY {device},ISNULL(tk.Priority,'Unknown') ORDER BY AlertCount DESC,Device"
+        pred=_monitoring_predicate("tk")
+        q=f"SELECT {device} Device,'Monitoring-generated ticket' AlertType,ISNULL(tk.Priority,'Unknown') Severity,COUNT(*) AlertCount FROM qbr.Ticket tk {joins} WHERE {pred} AND {_date_filter('tk',date_col)} AND {scope} GROUP BY {device},ISNULL(tk.Priority,'Unknown') ORDER BY AlertCount DESC,Device"
         rows=db.execute(text(q),_params(start_date,end_date,tower,track)).fetchall()
         return pd.DataFrame([{"Device":r.Device,"AlertType":r.AlertType,"Severity":r.Severity,"Count":_safe_int(r.AlertCount)} for r in rows])
     finally: db.close()
@@ -224,8 +237,8 @@ def get_tower_track_alerts(start_date=None,end_date=None,tower=None,track=None):
     try:
         cols,joins,tower_expr,track_expr,_scope=_ticket_context(db,"tk");date_col="OpenedAt" if "OpenedAt" in cols else "CreatedAt"
         if "Caller" not in cols:return pd.DataFrame(columns=["Tower","Track","TotalAlerts","Critical","High","Moderate"])
-        monitoring_predicate = _monitoring_predicate("tk")
-        q=f"SELECT b.Tower,b.Track,COUNT(*) TotalAlerts,SUM(CASE WHEN UPPER(ISNULL(b.Priority,'')) LIKE '%CRITICAL%' OR b.Priority='1' THEN 1 ELSE 0 END) Critical,SUM(CASE WHEN UPPER(ISNULL(b.Priority,'')) LIKE '%HIGH%' OR b.Priority='2' THEN 1 ELSE 0 END) High,SUM(CASE WHEN UPPER(ISNULL(b.Priority,'')) LIKE '%MODERATE%' OR UPPER(ISNULL(b.Priority,'')) LIKE '%MEDIUM%' OR b.Priority='3' THEN 1 ELSE 0 END) Moderate FROM (SELECT {tower_expr} Tower,{track_expr} Track,tk.Priority FROM qbr.Ticket tk {joins} WHERE {monitoring_predicate} AND {_date_filter('tk',date_col)}) b WHERE (:tower IS NULL OR b.Tower=:tower) AND (:track IS NULL OR b.Track=:track) GROUP BY b.Tower,b.Track ORDER BY TotalAlerts DESC,b.Tower,b.Track"
+        pred=_monitoring_predicate("tk")
+        q=f"SELECT b.Tower,b.Track,COUNT(*) TotalAlerts,SUM(CASE WHEN UPPER(ISNULL(b.Priority,'')) LIKE '%CRITICAL%' OR b.Priority='1' THEN 1 ELSE 0 END) Critical,SUM(CASE WHEN UPPER(ISNULL(b.Priority,'')) LIKE '%HIGH%' OR b.Priority='2' THEN 1 ELSE 0 END) High,SUM(CASE WHEN UPPER(ISNULL(b.Priority,'')) LIKE '%MODERATE%' OR UPPER(ISNULL(b.Priority,'')) LIKE '%MEDIUM%' OR b.Priority='3' THEN 1 ELSE 0 END) Moderate FROM (SELECT {tower_expr} Tower,{track_expr} Track,tk.Priority FROM qbr.Ticket tk {joins} WHERE {pred} AND {_date_filter('tk',date_col)}) b WHERE (:tower IS NULL OR b.Tower=:tower) AND (:track IS NULL OR b.Track=:track) GROUP BY b.Tower,b.Track ORDER BY TotalAlerts DESC,b.Tower,b.Track"
         rows=db.execute(text(q),_params(start_date,end_date,tower,track)).fetchall()
         return pd.DataFrame([{"Tower":r.Tower,"Track":r.Track,"TotalAlerts":_safe_int(r.TotalAlerts),"Critical":_safe_int(r.Critical),"High":_safe_int(r.High),"Moderate":_safe_int(r.Moderate)} for r in rows])
     finally: db.close()

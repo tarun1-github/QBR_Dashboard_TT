@@ -125,120 +125,47 @@ def _fig(title,height=360):
 def _cuboid(fig,x,y,z,width,depth,height,label,color):
     x0,x1=x-width/2,x+width/2;y0,y1=y-depth/2,y+depth/2;z0,z1=0,height
     X=[x0,x1,x1,x0,x0,x1,x1,x0];Y=[y0,y0,y1,y1,y0,y0,y1,y1];Z=[z0,z0,z0,z0,z1,z1,z1,z1]
-    I=[0,0,0,1,1,2,4,4,4,5,5,6];J=[1,2,4,2,3,6,5,6,0,6,1,7];K=[2,4,5,3,7,7,6,0,1,7,2,4]
-    fig.add_trace(go.Mesh3d(x=X,y=Y,z=Z,i=I,j=J,k=K,color=color,opacity=.92,flatshading=True,hovertemplate=f"{label}<br><b>{height}</b> tickets<extra></extra>",showlegend=False))
-    fig.add_trace(go.Scatter3d(x=[x],y=[y],z=[height+.35],mode="text",text=[str(height)],textfont=dict(size=10,color="#12344d"),hoverinfo="skip",showlegend=False))
-
-def executive_volume_figure(df, x_col, title="📈 Executive Ticket Volume", height=430):
-    """Clean executive trend: total tickets as bars, parent/child as lines."""
-    d = df.copy().reset_index(drop=True)
-    if d.empty:
-        return go.Figure()
-    d["Total"] = pd.to_numeric(d["Total"], errors="coerce").fillna(0).astype(int)
-    parents = pd.to_numeric(d.get("Parents", 0), errors="coerce").fillna(0).astype(int) if "Parents" in d else pd.Series([0] * len(d))
-    children = pd.to_numeric(d.get("Children", 0), errors="coerce").fillna(0).astype(int) if "Children" in d else pd.Series([0] * len(d))
-    labels = d[x_col].astype(str).tolist()
-    fig = go.Figure()
-    fig.add_trace(go.Bar(
-        x=labels, y=d["Total"], name="Total",
-        marker=dict(color="#198da2", line=dict(color="#0f6f82", width=1)),
-        text=d["Total"], textposition="outside",
-        hovertemplate="<b>%{x}</b><br>Total tickets: %{y}<extra></extra>"
-    ))
-    fig.add_trace(go.Scatter(
-        x=labels, y=parents, name="Parent", mode="lines+markers+text",
-        text=parents.astype(str), textposition="top center",
-        line=dict(color="#6b9e3b", width=3), marker=dict(size=7),
-        hovertemplate="<b>%{x}</b><br>Parent: %{y}<extra></extra>"
-    ))
-    fig.add_trace(go.Scatter(
-        x=labels, y=children, name="Child", mode="lines+markers+text",
-        text=children.astype(str), textposition="top center",
-        line=dict(color="#ef7d2b", width=3), marker=dict(size=7),
-        hovertemplate="<b>%{x}</b><br>Child: %{y}<extra></extra>"
-    ))
-    fig.update_layout(
-        title=dict(text=title, font=dict(size=16, color="#12344d"), x=0.01),
-        height=height, margin=dict(l=40, r=25, t=50, b=45),
-        paper_bgcolor="rgba(0,0,0,0)", plot_bgcolor="#ffffff",
-        font=dict(family="Segoe UI", size=11, color="#12344d"),
-        hoverlabel=dict(bgcolor="#12344d", font_color="#ffffff"),
-        legend=dict(orientation="h", x=0, y=1.08),
-        bargap=0.28
-    )
-    fig.update_xaxes(title="Period", showgrid=False, tickangle=-25)
-    fig.update_yaxes(title="Tickets", rangemode="tozero", gridcolor="#e3edf0")
-    return fig
-
-def ticket_volume_by_tower_track_figure(df, title="📊 Ticket Volume by Tower → Track", height=430):
-    """Clean executive horizontal ranking of ticket volume."""
-    d = df.copy()
-    if d.empty:
-        return go.Figure()
-    d["Total"] = pd.to_numeric(d["Total"], errors="coerce").fillna(0).astype(int)
-    d["Label"] = d["Tower"].astype(str) + " → " + d["Track"].astype(str)
-    d = d.sort_values("Total", ascending=True).tail(12)
-    palette = {"Foundation":"#5b9f3b", "Collaboration":"#198da2", "Security":"#d94a4a", "Non-CMS":"#9b7b24"}
-    colors = [palette.get(str(t), "#547a90") for t in d["Tower"]]
-    fig = go.Figure(go.Bar(
-        x=d["Total"], y=d["Label"], orientation="h",
-        marker=dict(color=colors, line=dict(color="#ffffff", width=1)),
-        text=d["Total"], textposition="outside", cliponaxis=False,
-        customdata=d[["Tower","Track"]],
-        hovertemplate="<b>%{y}</b><br>Tower: %{customdata[0]}<br>Track: %{customdata[1]}<br>Tickets: %{x}<extra></extra>"
-    ))
-    fig.update_layout(
-        title=dict(text=title, font=dict(size=16, color="#12344d"), x=0.01),
-        height=height, margin=dict(l=10, r=55, t=50, b=35),
-        paper_bgcolor="rgba(0,0,0,0)", plot_bgcolor="#ffffff",
-        font=dict(family="Segoe UI", size=11, color="#12344d"), showlegend=False
-    )
-    fig.update_xaxes(title="Tickets", rangemode="tozero", gridcolor="#e3edf0")
-    fig.update_yaxes(title="", showgrid=False, automargin=True)
-    return fig
-
-
-
+    I=[0,0,0,1,1,2,4,4,4,5,5,6];J=[1,2,4,2,3,6,5,6,0,6,7,7];K=[2,4,5,3,7,7,6,0,1,2,2,4]
+    fig.add_trace(go.Mesh3d(x=X,y=Y,z=Z,i=I,j=J,k=K,color=color,opacity=.92,flatshading=True,hovertemplate=f"{label}<br><b>{height}</b><extra></extra>"))
 
 def horizontal_bar(labels,values,title,color,height=360,suffix=""):
-    pairs=sorted([(str(a),_safe_int(b)) for a,b in zip(labels,values)],key=lambda x:x[1])[-12:];labs=[a for a,b in pairs];vals=[b for a,b in pairs];fig=_fig(title,height);fig.add_trace(go.Bar(y=labs,x=vals,orientation="h",marker=dict(color=color,line=dict(color="#fff",width=1)),text=vals,texttemplate="%{text}"+suffix,textposition="outside",cliponaxis=False,hovertemplate="%{y}<br><b>%{x}</b>"+suffix+"<extra></extra>"));fig.update_xaxes(title="Count",rangemode="tozero",gridcolor="#e4eef1");fig.update_yaxes(showgrid=False,automargin=True);return fig
+    fig=go.Figure(go.Bar(x=values,y=labels,orientation="h",text=[f"{int(v):,}" for v in values],textposition="outside",marker=dict(color=color,line=dict(color="#12344d",width=1)),hovertemplate="%{y}<br><b>%{x:,}"+suffix+"</b><extra></extra>"))
+    fig.update_layout(title=dict(text=title,font=dict(size=16,color="#12344d"),x=.01),height=height,margin=dict(l=10,r=60,t=48,b=35),paper_bgcolor="rgba(0,0,0,0)",plot_bgcolor="#fff",font=dict(family="Segoe UI",color="#12344d",size=11),xaxis=dict(showgrid=True,gridcolor="#e3edf0",title=""),yaxis=dict(showgrid=False,title=""),showlegend=False)
+    return fig
+
+def executive_volume_figure(df,x,title,height=430):
+    fig=go.Figure()
+    fig.add_trace(go.Bar(x=df[x],y=df["Total"],name="Total Tickets",marker=dict(color="#168ba0"),text=df["Total"],textposition="outside",hovertemplate="%{x}<br><b>%{y:,}</b><extra></extra>"))
+    fig.add_trace(go.Scatter(x=df[x],y=df["Parents"],name="Parents",mode="lines+markers",line=dict(color="#7b5c08",width=3),hovertemplate="Parents: %{y:,}<extra></extra>"))
+    fig.add_trace(go.Scatter(x=df[x],y=df["Children"],name="Children",mode="lines+markers",line=dict(color="#b30e16",width=3),hovertemplate="Children: %{y:,}<extra></extra>"))
+    fig.update_layout(title=dict(text=title,font=dict(size=17,color="#12344d"),x=.01),height=height,margin=dict(l=10,r=20,t=50,b=55),paper_bgcolor="rgba(0,0,0,0)",plot_bgcolor="#fff",font=dict(family="Segoe UI",color="#12344d",size=11),xaxis=dict(showgrid=False,title=""),yaxis=dict(showgrid=True,gridcolor="#e3edf0",title="Tickets"),legend=dict(orientation="h",y=1.08,x=0),hovermode="x unified")
+    return fig
+
+def ticket_volume_by_tower_track_figure(df,title,height=430):
+    d=df.copy();d["Label"]=d["Tower"].astype(str)+" → "+d["Track"].astype(str);d=d.sort_values("Total",ascending=True).tail(15)
+    return horizontal_bar(d["Label"].tolist(),d["Total"].tolist(),title,"#0e6783",height," tickets")
 
 def alert_summary_figure(df):
-    d=df.head(12).copy();d["Label"]=d["Tower"].astype(str)+" → "+d["Track"].astype(str);d=d.iloc[::-1];fig=_fig("⚡ Alerts by Tower / Track",410)
-    for col,label,color in [("Critical","Critical","#c91f2b"),("High","High","#ee7d2b"),("Moderate","Moderate","#d2a63a")]:
-        if col in d:fig.add_trace(go.Bar(y=d["Label"],x=pd.to_numeric(d[col],errors="coerce").fillna(0),name=label,orientation="h",marker_color=color,text=pd.to_numeric(d[col],errors="coerce").fillna(0).astype(int),textposition="inside",hovertemplate=f"%{{y}}<br>{label}: <b>%{{x}}</b><extra></extra>"))
-    fig.update_layout(barmode="stack",showlegend=True,legend=dict(orientation="h",y=1.02,x=0,font=dict(size=10)));fig.update_xaxes(title="Alert count",rangemode="tozero",gridcolor="#e4eef1");fig.update_yaxes(showgrid=False,automargin=True);return fig
-
-r=role();title="Supervisor Dashboard" if r=="SUPERVISOR" else "Manager Dashboard" if r=="MANAGER" else "Superuser Dashboard"
-st.markdown(f'<div class="qbr-hero"><h1>📊 QBR Executive Dashboard</h1><p>HCLTech Customer Operations Command Center &nbsp;•&nbsp; <b>{title}</b> &nbsp;•&nbsp; Signed in: <b>{dname()}</b> &nbsp;•&nbsp; Role: <b>{r}</b></p></div>',unsafe_allow_html=True)
-
-if st.session_state.get("show_change_password",False):
-    st.markdown('<div class="qbr-card" style="max-width:620px;margin:4vh auto;padding:28px;">',unsafe_allow_html=True);st.markdown(f'<h1 style="text-align:center;color:#12344d;">🔐 Change Password</h1><p style="text-align:center;color:#557789;">Account: <b>{dname()}</b></p>',unsafe_allow_html=True)
-    current_pw=st.text_input("🔐 Current Password",type="password",key="cp_current");new_pw=st.text_input("🔑 New Password",type="password",key="cp_new");confirm_pw=st.text_input("✅ Confirm New Password",type="password",key="cp_confirm");a,b=st.columns(2)
-    with a:
-        if st.button("🔐 UPDATE PASSWORD",use_container_width=True):
-            if not(len(new_pw)>=8 and any(c.isupper() for c in new_pw) and any(c.islower() for c in new_pw) and any(c.isdigit() for c in new_pw)):msg("bad","Password policy failed.","Use 8+ characters with uppercase, lowercase and a number.")
-            elif new_pw!=confirm_pw:msg("bad","Passwords do not match.")
-            else:
-                db=SessionLocal()
-                try:
-                    if change_password(db,user()["UserID"],current_pw,new_pw):db.commit();msg("ok","Password changed successfully.");st.session_state.show_change_password=False;st.rerun()
-                    else:db.rollback();msg("bad","Current password is incorrect.")
-                except Exception as exc:db.rollback();msg("bad","Unable to change password.",str(exc))
-                finally:db.close()
-    with b:
-        if st.button("← BACK TO DASHBOARD",use_container_width=True):st.session_state.show_change_password=False;st.rerun()
-    st.markdown('</div>',unsafe_allow_html=True);st.stop()
+    d=df.copy();d["Label"]=d["Tower"].astype(str)+" → "+d["Track"].astype(str);d=d.sort_values("TotalAlerts",ascending=True).tail(15)
+    fig=go.Figure()
+    fig.add_trace(go.Bar(y=d["Label"],x=d["Critical"],name="Critical",orientation="h",marker=dict(color="#b30e16")))
+    fig.add_trace(go.Bar(y=d["Label"],x=d["High"],name="High",orientation="h",marker=dict(color="#e87323")))
+    fig.add_trace(go.Bar(y=d["Label"],x=d["Moderate"],name="Moderate",orientation="h",marker=dict(color="#7b8f21")))
+    fig.update_layout(barmode="stack",title=dict(text="Monitoring Tickets by Tower → Track",font=dict(size=16,color="#12344d"),x=.01),height=430,margin=dict(l=10,r=20,t=48,b=35),paper_bgcolor="rgba(0,0,0,0)",plot_bgcolor="#fff",font=dict(family="Segoe UI",color="#12344d",size=11),xaxis=dict(title="Monitoring tickets",showgrid=True,gridcolor="#e3edf0"),yaxis=dict(title=""),legend=dict(orientation="h",y=1.08,x=0))
+    return fig
 
 hierarchy=get_tower_track_hierarchy()
 with st.sidebar:
     st.markdown('<div class="qbr-side-title">🎛️ QBR DASHBOARD CONTROLS</div>',unsafe_allow_html=True)
-    # No st.cache_data.clear(): the previous button caused Streamlit's
-    # confirmation dialog and was unnecessary because dashboard queries are
-    # intentionally live against CPDB. A rerun is sufficient.
+    # No st.cache_data.clear(): the previous button caused Streamlit's confirmation dialog and was unnecessary.
     if st.button("🔄 Refresh Data",use_container_width=True):st.rerun()
     if st.button("🔐 Change Password",use_container_width=True):st.session_state.show_change_password=True;st.rerun()
     if st.button("🚪 Sign out",use_container_width=True):clear_session();st.rerun()
+    st.divider();allowed=assigned_tracks(uname()) if role()=="MANAGER" else []
+    tower_options=sorted({x[0] for x in allowed}) if role()=="MANAGER" else sorted(hierarchy.keys())
+    st.markdown('<div class="qbr-side-head">1️⃣ TOWER</div>',unsafe_allow_html=True)
+    tower=st.selectbox("Tower",["All"]+tower_options,label_visibility="collapsed",key="scope_tower")
+    tracks=sorted({track_name for track_list in hierarchy.values() for track_name in track_list}) if tower=="All" else sorted([str(track_name) for track_name in hierarchy.get(tower,[])])
     st.divider();allowed=assigned_tracks(uname()) if r=="MANAGER" else []
     tower_options=sorted({x[0] for x in allowed}) if r=="MANAGER" else sorted(hierarchy.keys())
     st.markdown('<div class="qbr-side-head">1️⃣ TOWER</div>',unsafe_allow_html=True);tower=st.selectbox("Tower",["All"]+tower_options,label_visibility="collapsed",key="scope_tower")
@@ -254,7 +181,7 @@ with st.sidebar:
 start=end=None
 if isinstance(dr,(tuple,list)) and len(dr)==2:start,end=dr[0],dr[1]
 elif isinstance(dr,date):start=end=dr
-if r=="MANAGER" and len(allowed)==1:tower=allowed[0][0] if tower=="All" else tower;track=allowed[0][1] if track=="All" else track
+if role()=="MANAGER" and len(allowed)==1:tower=allowed[0][0] if tower=="All" else tower;track=allowed[0][1] if track=="All" else track
 scope_tower=None if tower=="All" else tower;scope_track=None if track=="All" else track
 k=get_executive_kpis(start,end,scope_tower,scope_track);alerts_total=get_alert_total(start,end,scope_tower,scope_track);vol=get_tower_track_volume(start,end,scope_tower,scope_track);stats=get_volume_stats(start,end,scope_tower,scope_track);alerts=get_alert_frequency(start,end,scope_tower,scope_track);pc_df,children_df=get_parent_child_relation(start,end,scope_tower,scope_track);alert_summary=get_tower_track_alerts(start,end,scope_tower,scope_track)
 
@@ -264,8 +191,7 @@ for c,item in zip(st.columns(5),kpis[:5]):render_kpi(c,item)
 for c,item in zip(st.columns(4),kpis[5:]):render_kpi(c,item)
 
 if stats and stats.get("max_date") is not None and stats.get("min_date") is not None:
-    max_date=pd.to_datetime(stats["max_date"]).strftime("%d %b %Y")
-    min_date=pd.to_datetime(stats["min_date"]).strftime("%d %b %Y")
+    max_date=pd.to_datetime(stats["max_date"]).strftime("%d %b %Y");min_date=pd.to_datetime(stats["min_date"]).strftime("%d %b %Y")
     st.markdown(f'<div class="qbr-volume-note">📌 Maximum ticket volume: <b>{_safe_int(stats.get("max_count")):,}</b> tickets on <b>{max_date}</b> &nbsp; • &nbsp; Minimum ticket volume: <b>{_safe_int(stats.get("min_count")):,}</b> tickets on <b>{min_date}</b>.</div>',unsafe_allow_html=True)
 
 if view=="Day":trend=get_daily_trend(start,end,scope_tower,scope_track);x="Date"
@@ -301,9 +227,10 @@ if not alert_summary.empty:
     st.plotly_chart(alert_summary_figure(alert_summary),use_container_width=True,config={"displayModeBar":False});d=alert_summary.head(20).copy();d["TotalAlerts"]=pd.to_numeric(d["TotalAlerts"],errors="coerce").fillna(0).astype(int);st.dataframe(d[["Tower","Track","TotalAlerts","Critical","High","Moderate"]],use_container_width=True,hide_index=True)
 else:msg("inf","No Tower / Track alert rows.","No alert rows match the selected filters.")
 
-if r in ("SUPERUSER","SUPERVISOR"):
+if role() in ("SUPERUSER","SUPERVISOR"):
     st.markdown('<div class="qbr-section">👥 Manager & Role Administration</div>',unsafe_allow_html=True);st.caption("Assignment rule: one manager per Tower → Track, and one Tower → Track per manager.");users=manager_users();active_managers=[u for u in users if str(u["RoleName"]).upper()=="MANAGER"];towers=sorted(hierarchy.keys())
     if towers and active_managers:
+        tsel=st.selectbox("Tower",towers,key="admin_tower");trsel=st.selectbox("Track",[str(track_name) for track_name in hierarchy.get(tsel,[])],key="admin_track");msel=st.selectbox("Manager",[u["Username"] for u in active_managers],format_func=lambda x:next((f'{u["DisplayName"]} • {u["RoleName"]}' for u in active_managers if u["Username"]==x),x),key="admin_manager");aa,bb,cc=st.columns(3)
         tsel=st.selectbox("Tower",towers,key="admin_tower");trsel=st.selectbox("Track",[str(track_name) for track_name in hierarchy.get(tsel, [])],key="admin_track");msel=st.selectbox("Manager",[u["Username"] for u in active_managers],format_func=lambda x:next((f'{u["DisplayName"]} • {u["RoleName"]}' for u in active_managers if u["Username"]==x),x),key="admin_manager");aa,bb,cc=st.columns(3)
         with aa:
             if st.button("➕ Assign Manager",use_container_width=True):
