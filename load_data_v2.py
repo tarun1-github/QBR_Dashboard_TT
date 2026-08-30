@@ -300,7 +300,8 @@ def load(merged, db, replace):
 
             parent = first(row, ["Parent Incident", "ParentIncident", "Parent_Incident", "ParentTicketNumber", "Parent"])
             caller = first(row, ["Caller", "caller"])
-            monitoring = key(caller) in {"EMS", "CMSP"}
+            caller_key = key(caller)
+			monitoring = "EMS" in caller_key or "CMSP" in caller_key
             opened = dt(row, ["Opened", "OpenedAt", "Opened_At"])
             created = dt(row, ["Created", "CreatedAt", "Created_Date"]) or opened
             updated = dt(row, ["Updated", "UpdatedAt", "Updated_Date"])
