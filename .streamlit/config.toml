@@ -1,2 +1,13 @@
 [client]
 toolbarMode = "viewer"
+
+[server]
+address = "0.0.0.0"
+port = 8501
+
+sslCertFile = "E:/Projects/QBR_Ticket_Alert_Dashboard/certs/10.106.44.24+1.pem"
+sslKeyFile = "E:/Projects/QBR_Ticket_Alert_Dashboard/certs/10.106.44.24+1-key.pem"
+
+headless = true
+enableCORS = false
+enableXsrfProtection = true

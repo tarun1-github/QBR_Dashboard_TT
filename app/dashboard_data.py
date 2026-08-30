@@ -129,9 +129,8 @@ def get_executive_kpis(start_date=None,end_date=None,tower=None,track=None):
         child="CASE WHEN UPPER(ISNULL(tk.TicketType,''))='CHILD' THEN 1 ELSE 0 END" if "TicketType" in cols else "0"
         closed="CASE WHEN tk.ClosedAt IS NOT NULL THEN 1 ELSE 0 END" if "ClosedAt" in cols else "CASE WHEN LOWER(ISNULL(tk.State,''))='closed' THEN 1 ELSE 0 END"
         priority="ISNULL(tk.Priority,'')" if "Priority" in cols else "''"
-        monitoring=_monitoring_predicate("tk") if "Caller" in cols else "0"
-        monitoring_expr=f"CASE WHEN {monitoring} THEN 1 ELSE 0 END" if "Caller" in cols else "0"
-        q=f"SELECT COUNT(*) Total,SUM({parent}) Parents,SUM({child}) Children,SUM({closed}) Closed,SUM({monitoring_expr}) Monitoring,SUM(CASE WHEN {priority} IN ('1 - Critical','Critical','1') THEN 1 ELSE 0 END) Critical,SUM(CASE WHEN {priority} IN ('2 - High','High','2') THEN 1 ELSE 0 END) High,SUM(CASE WHEN {priority} IN ('3 - Moderate','Moderate','3','Medium') THEN 1 ELSE 0 END) Moderate FROM qbr.Ticket tk {joins} WHERE {_date_filter('tk',date_col)} AND {scope}"
+        monitoring=f"CASE WHEN {_monitoring_predicate('tk')} THEN 1 ELSE 0 END" if "Caller" in cols else "0"
+        q=f"SELECT COUNT(*) Total,SUM({parent}) Parents,SUM({child}) Children,SUM({closed}) Closed,SUM({monitoring}) Monitoring,SUM(CASE WHEN {priority} IN ('1 - Critical','Critical','1') THEN 1 ELSE 0 END) Critical,SUM(CASE WHEN {priority} IN ('2 - High','High','2') THEN 1 ELSE 0 END) High,SUM(CASE WHEN {priority} IN ('3 - Moderate','Moderate','3','Medium') THEN 1 ELSE 0 END) Moderate FROM qbr.Ticket tk {joins} WHERE {_date_filter('tk',date_col)} AND {scope}"
         r=db.execute(text(q),_params(start_date,end_date,tower,track)).fetchone()
         return {"total":_safe_int(r.Total),"parents":_safe_int(r.Parents),"children":_safe_int(r.Children),"closed":_safe_int(r.Closed),"monitoring":_safe_int(r.Monitoring),"critical":_safe_int(r.Critical),"high":_safe_int(r.High),"moderate":_safe_int(r.Moderate)}
     finally: db.close()
@@ -143,7 +142,8 @@ def get_alert_total(start_date=None,end_date=None,tower=None,track=None):
         cols,joins,_tower,_track,scope=_ticket_context(db,"tk")
         if "Caller" not in cols:return 0
         date_col="OpenedAt" if "OpenedAt" in cols else "CreatedAt"
-        q=f"SELECT COUNT(*) FROM qbr.Ticket tk {joins} WHERE {_monitoring_predicate('tk')} AND {_date_filter('tk',date_col)} AND {scope}"
+        monitoring_predicate = _monitoring_predicate("tk")
+        q=f"SELECT COUNT(*) FROM qbr.Ticket tk {joins} WHERE {monitoring_predicate} AND {_date_filter('tk',date_col)} AND {scope}"
         return _safe_int(db.execute(text(q),_params(start_date,end_date,tower,track)).scalar())
     finally: db.close()
 
@@ -187,7 +187,8 @@ def get_alert_frequency(start_date=None,end_date=None,tower=None,track=None):
         cols,joins,_tower,_track,scope=_ticket_context(db,"tk");date_col="OpenedAt" if "OpenedAt" in cols else "CreatedAt"
         if "Caller" not in cols:return pd.DataFrame(columns=["Device","AlertType","Severity","Count"])
         device="ISNULL(tk.Device,'Unknown')" if "Device" in cols else ("ISNULL(tk.Part,'Unknown')" if "Part" in cols else "'Unknown'")
-        q=f"SELECT {device} Device,'Monitoring-generated ticket' AlertType,ISNULL(tk.Priority,'Unknown') Severity,COUNT(*) AlertCount FROM qbr.Ticket tk {joins} WHERE {_monitoring_predicate('tk')} AND {_date_filter('tk',date_col)} AND {scope} GROUP BY {device},ISNULL(tk.Priority,'Unknown') ORDER BY AlertCount DESC,Device"
+        monitoring_predicate = _monitoring_predicate("tk")
+        q=f"SELECT {device} Device,'Monitoring-generated ticket' AlertType,ISNULL(tk.Priority,'Unknown') Severity,COUNT(*) AlertCount FROM qbr.Ticket tk {joins} WHERE {monitoring_predicate} AND {_date_filter('tk',date_col)} AND {scope} GROUP BY {device},ISNULL(tk.Priority,'Unknown') ORDER BY AlertCount DESC,Device"
         rows=db.execute(text(q),_params(start_date,end_date,tower,track)).fetchall()
         return pd.DataFrame([{"Device":r.Device,"AlertType":r.AlertType,"Severity":r.Severity,"Count":_safe_int(r.AlertCount)} for r in rows])
     finally: db.close()
@@ -223,7 +224,8 @@ def get_tower_track_alerts(start_date=None,end_date=None,tower=None,track=None):
     try:
         cols,joins,tower_expr,track_expr,_scope=_ticket_context(db,"tk");date_col="OpenedAt" if "OpenedAt" in cols else "CreatedAt"
         if "Caller" not in cols:return pd.DataFrame(columns=["Tower","Track","TotalAlerts","Critical","High","Moderate"])
-        q=f"SELECT b.Tower,b.Track,COUNT(*) TotalAlerts,SUM(CASE WHEN UPPER(ISNULL(b.Priority,'')) LIKE '%CRITICAL%' OR b.Priority='1' THEN 1 ELSE 0 END) Critical,SUM(CASE WHEN UPPER(ISNULL(b.Priority,'')) LIKE '%HIGH%' OR b.Priority='2' THEN 1 ELSE 0 END) High,SUM(CASE WHEN UPPER(ISNULL(b.Priority,'')) LIKE '%MODERATE%' OR UPPER(ISNULL(b.Priority,'')) LIKE '%MEDIUM%' OR b.Priority='3' THEN 1 ELSE 0 END) Moderate FROM (SELECT {tower_expr} Tower,{track_expr} Track,tk.Priority FROM qbr.Ticket tk {joins} WHERE {_monitoring_predicate('tk')} AND {_date_filter('tk',date_col)}) b WHERE (:tower IS NULL OR b.Tower=:tower) AND (:track IS NULL OR b.Track=:track) GROUP BY b.Tower,b.Track ORDER BY TotalAlerts DESC,b.Tower,b.Track"
+        monitoring_predicate = _monitoring_predicate("tk")
+        q=f"SELECT b.Tower,b.Track,COUNT(*) TotalAlerts,SUM(CASE WHEN UPPER(ISNULL(b.Priority,'')) LIKE '%CRITICAL%' OR b.Priority='1' THEN 1 ELSE 0 END) Critical,SUM(CASE WHEN UPPER(ISNULL(b.Priority,'')) LIKE '%HIGH%' OR b.Priority='2' THEN 1 ELSE 0 END) High,SUM(CASE WHEN UPPER(ISNULL(b.Priority,'')) LIKE '%MODERATE%' OR UPPER(ISNULL(b.Priority,'')) LIKE '%MEDIUM%' OR b.Priority='3' THEN 1 ELSE 0 END) Moderate FROM (SELECT {tower_expr} Tower,{track_expr} Track,tk.Priority FROM qbr.Ticket tk {joins} WHERE {monitoring_predicate} AND {_date_filter('tk',date_col)}) b WHERE (:tower IS NULL OR b.Tower=:tower) AND (:track IS NULL OR b.Track=:track) GROUP BY b.Tower,b.Track ORDER BY TotalAlerts DESC,b.Tower,b.Track"
         rows=db.execute(text(q),_params(start_date,end_date,tower,track)).fetchall()
         return pd.DataFrame([{"Tower":r.Tower,"Track":r.Track,"TotalAlerts":_safe_int(r.TotalAlerts),"Critical":_safe_int(r.Critical),"High":_safe_int(r.High),"Moderate":_safe_int(r.Moderate)} for r in rows])
     finally: db.close()
