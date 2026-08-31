@@ -7,3 +7,9 @@ venv/
 data/archive/*
 data/output/*
 logs/*
+
+.env
+.env.docker
+
+.env
+.env.docker
