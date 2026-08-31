@@ -1,4 +1,7 @@
+<<<<<<< HEAD
+=======
 @'
+>>>>>>> origin/main
 .git
 .github
 venv
@@ -7,15 +10,27 @@ __pycache__
 *.pyc
 *.pyo
 *.pyd
+<<<<<<< HEAD
+.env
+.env.*
+!.env.example
+=======
 
 .env
 .env.*
 !.env.example
 
+>>>>>>> origin/main
 app_local_backup
 *_backup*
 *.bak
 *.tmp
+<<<<<<< HEAD
+qbr.db
+app/dataset/processed
+app/dataset/archive
+app/dataset/_duplicate_records.xlsx
+=======
 
 qbr.db
 
@@ -23,11 +38,18 @@ app/dataset/processed
 app/dataset/archive
 app/dataset/_duplicate_records.xlsx
 
+>>>>>>> origin/main
 certs
 *.pem
 *.key
 *.crt
 *.pfx
+<<<<<<< HEAD
+.pytest_cache
+.mypy_cache
+.ipynb_checkpoints
+*.patch
+=======
 
 .pytest_cache
 .mypy_cache
@@ -39,3 +61,4 @@ README*
 *.bat
 *.patch
 '@ | Set-Content .dockerignore
+>>>>>>> origin/main
