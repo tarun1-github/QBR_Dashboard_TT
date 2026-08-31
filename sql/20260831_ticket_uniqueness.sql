@@ -8,9 +8,13 @@
  Application loader already performs duplicate detection and existing-ticket
  checks. This migration adds the final database-level guard.
 
+ Design:
+   TicketNumberKey is a normalized persisted computed column.
+   A CHECK constraint prevents NULL/blank TicketNumber values.
+   A UNIQUE index is then created on TicketNumberKey.
+
  IMPORTANT:
-   Run the validation queries first. Do not execute the CREATE INDEX section
-   until validation returns zero duplicate/blank TicketNumber keys.
+   Validation must return zero rows before the constraint/index section is run.
 */
 
 USE [CPDB];
@@ -35,7 +39,7 @@ WHERE TicketNumber IS NULL
    OR LTRIM(RTRIM(TicketNumber)) = '';
 GO
 
-/* 3. Add normalized persisted key only if it does not already exist */
+/* 3. Add normalized persisted key if it does not already exist */
 IF COL_LENGTH('qbr.Ticket', 'TicketNumberKey') IS NULL
 BEGIN
     ALTER TABLE qbr.Ticket
@@ -43,7 +47,25 @@ BEGIN
 END;
 GO
 
-/* 4. Enforce uniqueness for meaningful ticket numbers */
+/* 4. Prevent future NULL/blank TicketNumber values */
+IF NOT EXISTS
+(
+    SELECT 1
+    FROM sys.check_constraints
+    WHERE parent_object_id = OBJECT_ID('qbr.Ticket', 'U')
+      AND name = 'CK_Ticket_TicketNumber_NotBlank'
+)
+BEGIN
+    ALTER TABLE qbr.Ticket
+    ADD CONSTRAINT CK_Ticket_TicketNumber_NotBlank
+        CHECK (TicketNumber IS NOT NULL AND LTRIM(RTRIM(TicketNumber)) <> '');
+END;
+GO
+
+/* 5. Enforce uniqueness on the normalized key.
+      No filtered index is used because SQL Server does not allow a computed
+      column in a filtered-index predicate. The CHECK constraint above makes
+      the key non-NULL/non-blank for every valid row. */
 IF NOT EXISTS
 (
     SELECT 1
@@ -53,13 +75,11 @@ IF NOT EXISTS
 )
 BEGIN
     CREATE UNIQUE NONCLUSTERED INDEX UX_Ticket_TicketNumberKey
-        ON qbr.Ticket (TicketNumberKey)
-        WHERE TicketNumberKey IS NOT NULL
-          AND TicketNumberKey <> '';
+        ON qbr.Ticket (TicketNumberKey);
 END;
 GO
 
-/* 5. Verify */
+/* 6. Verify */
 SELECT
     i.name AS IndexName,
     i.is_unique,
@@ -74,4 +94,14 @@ JOIN sys.columns c
  AND c.column_id = ic.column_id
 WHERE i.object_id = OBJECT_ID('qbr.Ticket', 'U')
   AND i.name = 'UX_Ticket_TicketNumberKey';
+GO
+
+/* 7. Verify the CHECK constraint */
+SELECT
+    name AS ConstraintName,
+    is_disabled,
+    definition
+FROM sys.check_constraints
+WHERE parent_object_id = OBJECT_ID('qbr.Ticket', 'U')
+  AND name = 'CK_Ticket_TicketNumber_NotBlank';
 GO
